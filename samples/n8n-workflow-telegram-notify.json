@@ -1,0 +1,59 @@
+{
+  "name": "Notify on Approved Action",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "personal-os/action-approved",
+        "responseMode": "onReceived",
+        "responseData": {
+          "responseCode": 200,
+          "responseBody": {
+            "status": "ok",
+            "message": "Action approved notification received"
+          }
+        },
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channelId": "-1001234567890",
+        "text": "={{ $json[\"agent\"] }} action approved: {{$json[\"action_type\"]}}\nDetails: {{$json[\"payload\"]}}",
+        "chatId": {
+          "value": "-1001234567890"
+        }
+      },
+      "name": "Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ],
+      "webhookId": "personal-os/action-approved"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "1"
+}

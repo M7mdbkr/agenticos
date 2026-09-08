@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Agent — AgenticOS</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d0d0f;
+    color: #e0e0e0;
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 16px 24px;
+    border-bottom: 1px solid #1c1c1e;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  header h1 { font-size: 16px; font-weight: 700; color: #fff; }
+  header .status { font-size: 11px; color: #34C759; }
+  .chat { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 70%; padding: 12px 16px; border-radius: 16px; font-size: 14px; line-height: 1.5; }
+  .msg.user { align-self: flex-end; background: #5856d6; color: #fff; border-bottom-right-radius: 4px; }
+  .msg.ai { align-self: flex-start; background: #1c1c1e; color: #e0e0e0; border-bottom-left-radius: 4px; }
+  .msg.system { align-self: center; background: none; color: #555; font-size: 12px; text-align: center; }
+  .composer {
+    padding: 16px 24px;
+    border-top: 1px solid #1c1c1e;
+    display: flex;
+    gap: 12px;
+  }
+  .composer input {
+    flex: 1;
+    background: #1c1c1e;
+    border: 1px solid #2c2c2e;
+    border-radius: 12px;
+    padding: 12px 16px;
+    color: #fff;
+    font-size: 14px;
+    outline: none;
+  }
+  .composer input:focus { border-color: #5856d6; }
+  .composer button {
+    background: #5856d6;
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .composer button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .typing { color: #555; font-size: 12px; align-self: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>💼 Job Agent</h1>
+  <span class="status" id="status">● Ready</span>
+</header>
+<div class="chat" id="chat">
+  <div class="msg system">Job Agent is online. Ask about job searches, applications, or pipeline status.</div>
+</div>
+<div class="composer">
+  <input id="input" placeholder="Search for jobs, ask about pipeline status…" autofocus>
+  <button id="send" onclick="send()">Send</button>
+</div>
+
+<script>
+const chat = document.getElementById('chat');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send');
+const status = document.getElementById('status');
+
+const OLLAMA = 'http://localhost:11434/api/generate';
+const SYSTEM = `You are the Job Agent for Mohammad J. Bakr. You help him:
+- Search and track job applications in Saudi Arabia / UAE
+- Draft CVs tailored to specific jobs
+- Log applications to his tracking system
+- Outreach to HR contacts
+- Monitor application status
+Keep replies short, clear, and actionable. When asked to search, give specific commands or steps. When asked to log something, confirm what was logged.
+
+Mohammad's profile:
+- Computer Engineering, Taif University (grad 2026), GPA 3.22/4
+- Skills: AI, Cloud, Cyber, Networking, Embedded Systems, C++, React, SQLite, WebAssembly
+- Location: Saudi Arabia / UAE / Remote
+- Target roles: Software Engineer, AI/ML Engineer, Embedded Engineer, Full-stack Developer`;
+
+let history = [];
+
+async function send() {
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  addMsg('user', text);
+  history.push({ role: 'user', content: text });
+  setStatus('● Thinking…', '#FF9500');
+  sendBtn.disabled = true;
+
+  try {
+    const prompt = [...history].map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n');
+    const response = await fetch(OLLAMA, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'qwen2.5:7b',
+        prompt: `System: ${SYSTEM}\n\n${prompt}\nAssistant:`,
+        stream: false
+      })
+    });
+    const data = await response.json();
+    const reply = data.response || 'No response from model.';
+    history.push({ role: 'assistant', content: reply });
+    addMsg('ai', reply);
+    setStatus('● Ready', '#34C759');
+  } catch (e) {
+    addMsg('system', 'Error: ' + e.message);
+    setStatus('● Error', '#FF3B30');
+  }
+  sendBtn.disabled = false;
+  input.focus();
+}
+
+function addMsg(type, text) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + type;
+  el.textContent = text;
+  chat.appendChild(el);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function setStatus(text, color) {
+  status.textContent = text;
+  status.style.color = color;
+}
+
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter') send();
+});
+</script>
+</body>
+</html>

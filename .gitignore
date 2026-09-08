@@ -1,0 +1,20 @@
+# Runtime and private data
+.env
+.env.*
+*.db
+*.db-wal
+*.db-shm
+data/
+uploads/
+browser-profiles/
+vault/
+static/uploads/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# macOS / editors
+.DS_Store
+.vscode/
+.idea/

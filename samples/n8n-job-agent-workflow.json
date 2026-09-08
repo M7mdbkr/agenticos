@@ -1,0 +1,83 @@
+{
+  "name": "AgenticOS \u2014 Job Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "\ud83e\udd16 Job Agent is online!\n\nSend me a job title or company name and I'll help you track it.",
+        "additionalFields": {}
+      },
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [
+        250,
+        400
+      ],
+      "webhookId": "agenticos-job-agent"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"model\": \"qwen2.5:7b\", \"prompt\": \"You are the Job Agent for Mohammad J. Bakr (CE grad, Taif University 2026, GPA 3.22/4). Skills: AI, Cloud, Cyber, Networking, Embedded, C++, React, SQLite. Location: Saudi Arabia/UAE/Remote. Reply to: {{ $json.message.text }}. Keep it short and actionable.\", \"stream\": false}",
+        "options": {}
+      },
+      "name": "Ollama \u2014 Job Brain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        500,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.response }}",
+        "additionalFields": {}
+      },
+      "name": "Telegram \u2014 Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        750,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Ollama \u2014 Job Brain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama \u2014 Job Brain": {
+      "main": [
+        [
+          {
+            "node": "Telegram \u2014 Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticQuad": false,
+  "tags": [
+    "agenticos",
+    "job-agent"
+  ]
+}

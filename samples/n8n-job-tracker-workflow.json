@@ -1,0 +1,130 @@
+{
+  "name": "AgenticOS — Job Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "agenticos-job-applied",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Webhook — Job Applied",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "agenticos-job-applied"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "TODO_GOOGLE_SHEET_ID",
+        "range": "A1:F1",
+        "columns": {
+          "options": [
+            { "columnHeader": "Company", "data": "={{ $json.body.company }}" },
+            { "columnHeader": "Role", "data": "={{ $json.body.role }}" },
+            { "columnHeader": "Location", "data": "={{ $json.body.location }}" },
+            { "columnHeader": "Status", "data": "Applied" },
+            { "columnHeader": "Date Applied", "data": "={{ $now.format('YYYY-MM-DD') }}" },
+            { "columnHeader": "Notes", "data": "={{ $json.body.notes }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Google Sheets — Append Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 3,
+      "position": [500, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TODO_GOOGLE_CREDS_ID",
+          "name": "TODO_GOOGLE_CREDS_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "title": "={{ $json.body.company }} — {{ $json.body.role }}",
+        "databaseId": "TODO_NOTION_DATABASE_ID",
+        "properties": {
+          "Company": { "title": [{ "text": { "content": "={{ $json.body.company }}" } }] },
+          "Role": { "rich_text": [{ "text": { "content": "={{ $json.body.role }}" } }] },
+          "Location": { "rich_text": [{ "text": { "content": "={{ $json.body.location }}" } }] },
+          "Status": { "select": { "name": "Applied" } },
+          "Date Applied": { "date": { "start": "={{ $now.format('YYYY-MM-DD') }}" } }
+        },
+        "options": {}
+      },
+      "name": "Notion — Create Page",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 1,
+      "position": [500, 400],
+      "credentials": {
+        "notionApi": {
+          "id": "TODO_NOTION_CREDS_ID",
+          "name": "TODO_NOTION_CREDS_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "TODO_TELEGRAM_CHAT_ID",
+        "text": "=✅ *New Job Application*\n\n🏢 Company: `{{ $json.body.company }}`\n💼 Role: `{{ $json.body.role }}`\n📍 Location: `{{ $json.body.location }}`\n📅 Date: `{{ $now.format('YYYY-MM-DD') }}`\n\nReply *APPROVE* to confirm or *SKIP* to skip.",
+        "additionalFields": {}
+      },
+      "name": "Telegram — Notify",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetId": "TODO_GOOGLE_SHEET_ID",
+        "range": "A1:F1",
+        "columns": {
+          "options": [
+            { "columnHeader": "Company", "data": "={{ $json.company }}" },
+            { "columnHeader": "Role", "data": "={{ $json.role }}" },
+            { "columnHeader": "Location", "data": "={{ $json.location }}" },
+            { "columnHeader": "Status", "data": "={{ $json.status }}" },
+            { "columnHeader": "Date Applied", "data": "={{ $now.format('YYYY-MM-DD') }}" },
+            { "columnHeader": "Notes", "data": "={{ $json.notes }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Google Sheets — Log All",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 3,
+      "position": [500, 550],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "TODO_GOOGLE_CREDS_ID",
+          "name": "TODO_GOOGLE_CREDS_NAME"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook — Job Applied": {
+      "main": [
+        [
+          { "node": "Google Sheets — Append Row" },
+          { "node": "Notion — Create Page" },
+          { "node": "Telegram — Notify" }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticQuad": false,
+  "tags": ["agenticos", "job-tracker"],
+  "meta": {
+    "templateCredsSetupCount": 3,
+    "templateIdGenerated": "agenticos-job-tracker"
+  }
+}
