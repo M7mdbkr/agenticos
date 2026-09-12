@@ -18,7 +18,8 @@ A local-first personal agent operating system with 4 specialist agents, approval
 
 ```
 personal-os/
-├── personal_os.py          ← SQLite core — agents, messages, actions, audit
+├── personal_os.py          ← SQLite core — agents, messages, actions, inbox, audit
+├── inbox.py                ← Offline email triage: classification + reply templates
 ├── server.py               ← ThreadingHTTPServer — REST API, RSS fetcher, n8n
 ├── index.html               ← SPA shell
 ├── static/
@@ -28,6 +29,7 @@ personal-os/
 │   ├── PROMPTS.md           ← System prompts for all 4 agents
 │   ├── NOTION-DESIGN.md    ← 10 ready-to-paste Notion page templates
 │   ├── GITHUB-SETUP.md     ← GitHub init, CI, branch strategy
+│   ├── INBOX-EMAIL-TRIGGER.md ← Email trigger setup, API, hardware notes
 │   └── ENGINEERING-REPORT.md ← Architecture, threat model, data model
 ├── samples/
 │   └── n8n-workflow-telegram-notify.json  ← Import into n8n
@@ -131,7 +133,7 @@ Key pages to create:
 | Limitation | Workaround |
 |---|---|
 | No automatic LinkedIn apply | Open agent browser → manual apply → record in Job Tracker |
-| No email sending yet | Connect Gmail via Hermes → OAuth flow |
+| AgenticOS cannot send mail itself | By design. Approved replies are delivered by n8n, which reports the message id back |
 | n8n runs separately | n8n manages its own credential store |
 | Browser profiles not sandboxed | Don't log into high-value accounts in agent browsers |
 | No mobile UI | Designed for desktop (1024px+); works on tablet |

@@ -126,6 +126,33 @@ class OperationsStore:
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS inbox_emails(
+          id TEXT PRIMARY KEY,
+          message_id TEXT NOT NULL UNIQUE,
+          source TEXT NOT NULL DEFAULT 'n8n',
+          from_name TEXT NOT NULL DEFAULT '',
+          from_address TEXT NOT NULL DEFAULT '',
+          to_address TEXT NOT NULL DEFAULT '',
+          subject TEXT NOT NULL DEFAULT '',
+          body TEXT NOT NULL DEFAULT '',
+          received_at TEXT NOT NULL DEFAULT '',
+          company TEXT NOT NULL DEFAULT '',
+          category TEXT NOT NULL DEFAULT 'other',
+          confidence REAL NOT NULL DEFAULT 0,
+          signals_json TEXT NOT NULL DEFAULT '[]',
+          language TEXT NOT NULL DEFAULT 'en',
+          status TEXT NOT NULL DEFAULT 'new',
+          draft_subject TEXT NOT NULL DEFAULT '',
+          draft_body TEXT NOT NULL DEFAULT '',
+          draft_source TEXT NOT NULL DEFAULT '',
+          action_id TEXT,
+          job_application_id TEXT,
+          provider_message_id TEXT NOT NULL DEFAULT '',
+          replied_at TEXT,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS inbox_emails_status ON inbox_emails(status);
+        CREATE INDEX IF NOT EXISTS inbox_emails_received ON inbox_emails(received_at DESC);
         CREATE TABLE IF NOT EXISTS base_resume(
           id TEXT PRIMARY KEY,
           original_name TEXT NOT NULL,
@@ -594,6 +621,138 @@ class OperationsStore:
     def get_base_resume(self) -> Optional[Dict[str, Any]]:
         row = self.db.execute("SELECT * FROM base_resume ORDER BY created_at DESC LIMIT 1").fetchone()
         return dict(row) if row else None
+
+    # ── Inbox: company email replies ───────────────────────────────────────
+
+    INBOX_STATUSES = {"new", "drafted", "awaiting_approval", "approved",
+                      "sent", "denied", "archived"}
+
+    def ingest_email(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Store one inbound email. Idempotent on message_id: a repeated
+        delivery from n8n returns the existing record instead of duplicating it.
+
+        Only message metadata and body text are stored — never credentials,
+        OAuth tokens or raw provider headers.
+        """
+        message_id = str(data.get("message_id") or "").strip()
+        if not message_id:
+            raise ValueError("message_id is required so repeated deliveries are not duplicated")
+        existing = self.db.execute("SELECT * FROM inbox_emails WHERE message_id=?", (message_id,)).fetchone()
+        if existing:
+            item = self._row(existing)
+            item["duplicate"] = True
+            return item
+        now = utcnow()
+        item = {
+            "id": str(uuid.uuid4()),
+            "message_id": message_id,
+            "source": str(data.get("source") or "n8n")[:40],
+            "from_name": str(data.get("from_name") or "")[:200],
+            "from_address": str(data.get("from_address") or "")[:320],
+            "to_address": str(data.get("to_address") or "")[:320],
+            "subject": str(data.get("subject") or "")[:500],
+            "body": str(data.get("body") or "")[:200_000],
+            "received_at": str(data.get("received_at") or now)[:64],
+            "company": str(data.get("company") or "")[:200],
+            "category": str(data.get("category") or "other")[:40],
+            "confidence": float(data.get("confidence") or 0.0),
+            "signals": list(data.get("signals") or []),
+            "language": str(data.get("language") or "en")[:8],
+            "status": "new",
+            "draft_subject": "",
+            "draft_body": "",
+            "draft_source": "",
+            "action_id": None,
+            "job_application_id": data.get("job_application_id"),
+            "provider_message_id": "",
+            "replied_at": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        self.db.execute(
+            """INSERT INTO inbox_emails(id,message_id,source,from_name,from_address,to_address,subject,body,
+               received_at,company,category,confidence,signals_json,language,status,draft_subject,draft_body,
+               draft_source,action_id,job_application_id,provider_message_id,replied_at,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (item["id"], item["message_id"], item["source"], item["from_name"], item["from_address"],
+             item["to_address"], item["subject"], item["body"], item["received_at"], item["company"],
+             item["category"], item["confidence"], json_dump(item["signals"]), item["language"], item["status"],
+             "", "", "", None, item["job_application_id"], "", None, now, now))
+        self.db.commit()
+        # The audit trail records that a message arrived and how it was classified.
+        # It deliberately does not copy the body.
+        self._audit("inbox.received", {"id": item["id"], "from": item["from_address"],
+                                       "subject": item["subject"][:120], "category": item["category"],
+                                       "confidence": round(item["confidence"], 2)})
+        item["duplicate"] = False
+        return item
+
+    def list_inbox(self, status: Optional[str] = None, limit: int = 200) -> List[Dict[str, Any]]:
+        if status:
+            rows = self.db.execute(
+                "SELECT * FROM inbox_emails WHERE status=? ORDER BY received_at DESC, created_at DESC LIMIT ?",
+                (status, max(1, min(limit, 500)))).fetchall()
+        else:
+            rows = self.db.execute(
+                "SELECT * FROM inbox_emails ORDER BY received_at DESC, created_at DESC LIMIT ?",
+                (max(1, min(limit, 500)),)).fetchall()
+        return [self._row(r) for r in rows]
+
+    def get_email(self, email_id: str) -> Dict[str, Any]:
+        row = self.db.execute("SELECT * FROM inbox_emails WHERE id=?", (email_id,)).fetchone()
+        if not row:
+            raise KeyError("Email not found")
+        return self._row(row)
+
+    def update_email(self, email_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        self.get_email(email_id)
+        allowed = ("company", "category", "confidence", "status", "draft_subject", "draft_body",
+                   "draft_source", "action_id", "job_application_id", "provider_message_id", "replied_at")
+        changes = {k: v for k, v in data.items() if k in allowed}
+        if "status" in changes and changes["status"] not in self.INBOX_STATUSES:
+            raise ValueError("Unknown inbox status")
+        if "signals" in data:
+            changes["signals_json"] = json_dump(list(data["signals"]))
+        if not changes:
+            return self.get_email(email_id)
+        changes["updated_at"] = utcnow()
+        assignments = ",".join(f"{key}=?" for key in changes)
+        self.db.execute(f"UPDATE inbox_emails SET {assignments} WHERE id=?",
+                        (*changes.values(), email_id))
+        self.db.commit()
+        self._audit("inbox.updated", {"id": email_id, "fields": sorted(changes)})
+        return self.get_email(email_id)
+
+    def inbox_summary(self) -> Dict[str, Any]:
+        rows = self.db.execute("SELECT status, COUNT(*) FROM inbox_emails GROUP BY status").fetchall()
+        by_status = {r[0]: r[1] for r in rows}
+        rows = self.db.execute("SELECT category, COUNT(*) FROM inbox_emails GROUP BY category").fetchall()
+        return {"by_status": by_status, "by_category": {r[0]: r[1] for r in rows},
+                "total": sum(by_status.values())}
+
+    def mark_email_sent(self, email_id: str, provider_message_id: str) -> Dict[str, Any]:
+        """Record a *confirmed* send. Called back by the automation that actually
+        delivered the reply, carrying the provider's own message id. Without that
+        confirmation the reply is never shown as sent.
+        """
+        email = self.get_email(email_id)
+        confirmation = str(provider_message_id or "").strip()
+        if not confirmation:
+            raise ValueError("provider_message_id is required as proof the reply was delivered")
+        if email["status"] not in {"approved", "sent"}:
+            raise ValueError("Only an approved reply can be marked as sent")
+        now = utcnow()
+        self.db.execute("UPDATE inbox_emails SET status='sent',provider_message_id=?,replied_at=?,updated_at=? WHERE id=?",
+                        (confirmation, now, now, email_id))
+        self.db.commit()
+        self._audit("inbox.reply_confirmed", {"id": email_id, "provider_message_id": confirmation})
+        return self.get_email(email_id)
+
+    def delete_email(self, email_id: str) -> None:
+        self.get_email(email_id)
+        self.db.execute("DELETE FROM inbox_emails WHERE id=?", (email_id,))
+        self.db.commit()
+        self._audit("inbox.deleted", {"id": email_id})
 
     # ── Audit / Activity ───────────────────────────────────────────────────
 

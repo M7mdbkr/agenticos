@@ -1,0 +1,97 @@
+{
+  "name": "AgenticOS — Send an approved reply",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "agenticos/action-approved",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "name": "Approval webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "notes": "Register this URL in the AgenticOS n8n page. Every approved action is posted here; the IF node below drops anything that is not an inbox reply."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "operator": { "type": "string", "operation": "equals" },
+              "leftValue": "={{ $json.action_type }}",
+              "rightValue": "send_email"
+            },
+            {
+              "operator": { "type": "string", "operation": "notEmpty" },
+              "leftValue": "={{ $json.payload.inbox_email_id }}",
+              "rightValue": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Is an approved inbox reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.payload.to }}",
+        "subject": "={{ $json.payload.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.payload.body }}",
+        "options": {}
+      },
+      "name": "Gmail — send reply",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [740, 260],
+      "notes": "Sends exactly the approved text. Do not add expressions that rewrite the body here — the approved wording is what was reviewed."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://127.0.0.1:8765/api/inbox/{{ $('Is an approved inbox reply?').item.json.payload.inbox_email_id }}/sent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameter": [
+            {
+              "name": "X-AgenticOS-Token",
+              "value": "={{ $env.AGENTICOS_INGEST_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ provider_message_id: $json.id || $json.messageId || '' }) }}",
+        "options": { "timeout": 10000 }
+      },
+      "name": "Confirm delivery to AgenticOS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 260],
+      "notes": "Carries Gmail's own message id back. Until this call succeeds, AgenticOS shows the reply as approved but NOT sent — which is the honest state."
+    }
+  ],
+  "connections": {
+    "Approval webhook": {
+      "main": [[{ "node": "Is an approved inbox reply?", "type": "main", "index": 0 }]]
+    },
+    "Is an approved inbox reply?": {
+      "main": [
+        [{ "node": "Gmail — send reply", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Gmail — send reply": {
+      "main": [[{ "node": "Confirm delivery to AgenticOS", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "agenticos-inbox-send"
+}

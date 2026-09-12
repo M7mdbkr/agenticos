@@ -344,7 +344,12 @@ _OLLAMA_BASE = "http://localhost:11434"
 
 
 def _ollama_status() -> dict:
-    """Check if Ollama server is reachable."""
+    """Report whether Ollama is installed and its local server answers.
+
+    "installed" follows the binary actually being on PATH — reporting it as
+    installed when it is not would be a claim this function cannot back up.
+    """
+    installed = bool(shutil.which("ollama"))
     try:
         req = urllib.request.Request(f"{_OLLAMA_BASE}/api/tags",
                                     headers={"Accept": "application/json"})
@@ -353,9 +358,10 @@ def _ollama_status() -> dict:
         names = [m["name"] for m in models.get("models", [])]
         return {"installed": True, "authenticated": True,
                 "note": f"Local server OK · {len(names)} models available: {', '.join(names[:5])}{'…' if len(names) > 5 else ''}"}
-    except Exception as e:
-        return {"installed": True, "authenticated": False,
-                "note": f"Ollama server not reachable on port 11434. Start with: ollama serve"}
+    except Exception:
+        note = ("Ollama server not reachable on port 11434. Start with: ollama serve"
+                if installed else "Ollama is not installed. Install it to run local models.")
+        return {"installed": installed, "authenticated": False, "note": note}
 
 
 def _ollama_generate(model: str, system: str, messages: list) -> dict:

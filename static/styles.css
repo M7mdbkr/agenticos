@@ -1109,3 +1109,19 @@ dialog::backdrop {
 .ov-inline-form input{flex:1;min-width:160px}
 .ov-notes-widget{display:flex;flex-direction:column;gap:10px}
 .ov-notes-input{width:100%;min-height:160px;resize:vertical;padding:12px;font:13px/1.5 var(--sans);border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--foreground)}
+
+/* ── Inbox (company replies) ───────────────────── */
+.inbox-filters{display:flex;flex-wrap:wrap;gap:8px}
+.inbox-card .panel-head{align-items:flex-start;gap:16px}
+.inbox-tags{display:flex;flex-wrap:wrap;align-items:center;gap:6px;justify-content:flex-end}
+.inbox-tags .mono{font-size:11px;color:var(--ink-2)}
+.inbox-signals{font-size:12px;margin:4px 0 10px}
+.inbox-signals code{font-family:var(--mono);font-size:11px;background:rgba(255,255,255,0.05);padding:1px 5px;border-radius:4px}
+.inbox-body{margin:10px 0;max-height:320px;overflow:auto;white-space:pre-wrap}
+.inbox-draft{display:flex;flex-direction:column;gap:6px;margin:14px 0}
+.inbox-draft textarea{resize:vertical;font:13px/1.6 var(--sans)}
+.inbox-draft .muted{font-size:12px}
+@media (max-width:720px){
+  .inbox-card .panel-head{flex-direction:column}
+  .inbox-tags{justify-content:flex-start}
+}

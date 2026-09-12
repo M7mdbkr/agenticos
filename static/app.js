@@ -1,6 +1,6 @@
 const state={agents:[],health:null,current:'overview',resources:{},news:[],actions:[],uploads:[],audit:[]};
 const groups=[
- ['Command center',[['overview','⌂','Overview'],['ceo','◉','CEO workspace'],['approvals','✓','Approvals']]],
+ ['Command center',[['overview','⌂','Overview'],['ceo','◉','CEO workspace'],['inbox','◨','Inbox'],['approvals','✓','Approvals']]],
  ['Agents',[['agent-panel','◎','All agents'],['job','▤','Job application'],['dad','✉','Dad’s email'],['tech-news','◫','Tech news']]],
  ['Operations',[['tasks','☷','Tasks'],['delegations','⇄','Delegations'],['activity','◈','Activity'],['files','⇧','Files'],['browsers','◇','Agent browsers'],['schedules','◷','Schedules']]],
  ['System',[['models','◌','Models'],['tools','⌁','Tools'],['skills','✦','Skills'],['email_accounts','@','Email accounts'],['connectors','⇄','Connectors'],['job_sources','⌖','Job sources'],['telegram','✈','Telegram'],['n8n','⇔','n8n automation'],['audit','≡','Audit log']]],
@@ -450,7 +450,7 @@ async function delegationsPage(){
 }
 function reportPage(){return shell(head('ENGINEERING HANDOFF','Built to be understood.','Architecture, safety boundaries, setup, testing, and continuation decisions are documented in the repository.')+`<div class="grid two"><section class="panel"><h2>Documents</h2><div class="row"><div class="row-main"><h3>Engineering report</h3><p>Architecture, requirements mapping, threat model, data model, limitations, and roadmap.</p></div><a class="button small" href="/docs/ENGINEERING-REPORT.md" target="_blank">Open</a></div><div class="row"><div class="row-main"><h3>README</h3><p>Start, test, backup, Hermes integration, and account setup instructions.</p></div><a class="button small" href="/README.md" target="_blank">Open</a></div></section><aside class="panel"><h2>Implementation status</h2><div class="status-line"><span>Python + SQLite core</span><span class="pill green">Working</span></div><div class="status-line"><span>Agent chats</span><span class="pill green">Offline working</span></div><div class="status-line"><span>n8n integration</span><span class="pill green">Webhook POST on approval</span></div><div class="status-line"><span>Hermes adapter</span><span class="pill yellow">Opt-in</span></div><div class="status-line"><span>External accounts</span><span class="pill rose">Authorization needed</span></div><div class="status-line"><span>Protected external actions</span><span class="pill rose">Disabled</span></div></aside></div>`)}
 async function render(){
-if(state.current==='overview'){state.uploads=await api('/uploads');$('#content').innerHTML=overview();bindOverview()}else if(state.current==='agents')$('#content').innerHTML=agentsPage();else if(state.current==='agent-panel'){$('#content').innerHTML=await agentPanel();await loadAgentPanel()}else if(['ceo','job','dad'].includes(state.current))$('#content').innerHTML=await agentWorkspace(state.current);else if(state.current==='tech-news')$('#content').innerHTML=await techPage();else if(state.current==='approvals')$('#content').innerHTML=approvals();else if(state.current==='n8n')$('#content').innerHTML=await n8nPage();else if(state.current==='activity')$('#content').innerHTML=await activityPage();else if(state.current==='connectors')$('#content').innerHTML=await connectorsPage();else if(state.current==='delegations')$('#content').innerHTML=await delegationsPage();else if(state.current==='tasks'){$('#content').innerHTML=await tasksPage();bindPlanning()}else if(state.current==='schedules'){$('#content').innerHTML=await schedulesPage();bindPlanning()}else if(resourceMeta[state.current])$('#content').innerHTML=await resourcePage(state.current);else if(state.current==='files')$('#content').innerHTML=await filesPage();else if(state.current==='browsers')$('#content').innerHTML=browsersPage();else if(state.current==='models')$('#content').innerHTML=modelsPage();else if(state.current==='audit')$('#content').innerHTML=await auditPage();else if(state.current==='report')$('#content').innerHTML=reportPage();else if(state.current==='telegram')$('#content').innerHTML=await telegramPage();bind()}
+if(state.current==='overview'){state.uploads=await api('/uploads');$('#content').innerHTML=overview();bindOverview()}else if(state.current==='agents')$('#content').innerHTML=agentsPage();else if(state.current==='agent-panel'){$('#content').innerHTML=await agentPanel();await loadAgentPanel()}else if(['ceo','job','dad'].includes(state.current))$('#content').innerHTML=await agentWorkspace(state.current);else if(state.current==='tech-news')$('#content').innerHTML=await techPage();else if(state.current==='inbox'){$('#content').innerHTML=await inboxPage();bindInbox()}else if(state.current==='approvals')$('#content').innerHTML=approvals();else if(state.current==='n8n')$('#content').innerHTML=await n8nPage();else if(state.current==='activity')$('#content').innerHTML=await activityPage();else if(state.current==='connectors')$('#content').innerHTML=await connectorsPage();else if(state.current==='delegations')$('#content').innerHTML=await delegationsPage();else if(state.current==='tasks'){$('#content').innerHTML=await tasksPage();bindPlanning()}else if(state.current==='schedules'){$('#content').innerHTML=await schedulesPage();bindPlanning()}else if(resourceMeta[state.current])$('#content').innerHTML=await resourcePage(state.current);else if(state.current==='files')$('#content').innerHTML=await filesPage();else if(state.current==='browsers')$('#content').innerHTML=browsersPage();else if(state.current==='models')$('#content').innerHTML=modelsPage();else if(state.current==='audit')$('#content').innerHTML=await auditPage();else if(state.current==='report')$('#content').innerHTML=reportPage();else if(state.current==='telegram')$('#content').innerHTML=await telegramPage();bind()}
 function modal(title,kicker,body){$('#modal-title').textContent=title;$('#modal-kicker').textContent=kicker;$('#modal-body').innerHTML=body;$('#modal').showModal()}
 function agentForm(a={}){modal(a.slug?'Edit agent':'Add agent','AGENT DIRECTORY',`<form id="agent-form"><label>Name</label><input name="name" required value="${esc(a.name||'')}"><label>Slug</label><input name="slug" ${a.slug?'readonly':''} value="${esc(a.slug||'')}"><label>Purpose</label><textarea name="purpose">${esc(a.purpose||'')}</textarea><div class="form-row"><div><label>Provider</label><input name="model_provider" value="${esc(a.model_provider||'offline')}"></div><div><label>Model ID</label><input name="model_id" value="${esc(a.model_id||'deterministic')}"></div></div><label>Tools (comma-separated)</label><input name="tools" value="${esc((a.tools||[]).join(', '))}"><label>Skills (comma-separated)</label><input name="skills" value="${esc((a.skills||[]).join(', '))}"><label><input style="width:auto" type="checkbox" name="free_only" ${a.free_only?'checked':''}> Free/local only</label><div class="actions"><button class="button primary">Save agent</button></div></form>`);$('#agent-form').onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));d.tools=d.tools.split(',').map(x=>x.trim()).filter(Boolean);d.skills=d.skills.split(',').map(x=>x.trim()).filter(Boolean);d.free_only=!!e.target.free_only.checked;if(a.slug)await api(`/agents/${a.slug}`,{method:'PATCH',body:JSON.stringify(d)});else await api('/agents',{method:'POST',body:JSON.stringify(d)});$('#modal').close();toast('Agent saved');await go('agents')}}
 
@@ -523,6 +523,115 @@ function quickAgentModal(){
 }
 function resourceForm(kind,item={}){const m=resourceMeta[kind];modal(item.id?'Edit item':`Add ${m.title}`,'SYSTEM DIRECTORY',`<form id="resource-form">${m.fields.map(([key,label,type])=>type==='checkbox'?`<label><input style="width:auto" type="checkbox" name="${key}" ${item[key]?'checked':''}> ${label}</label>`:`<label>${label}</label>${['description','notes','prompt'].includes(key)?`<textarea name="${key}">${esc(item[key]||'')}</textarea>`:`<input name="${key}" value="${esc(item[key]||'')}">`}`).join('')}<div class="actions"><button class="button primary">Save</button></div></form>`);$('#resource-form').onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));const cb=m.fields.find(x=>x[2]==='checkbox');if(cb)d[cb[0]]=!!e.target[cb[0]].checked;await api(`/resources/${kind}${item.id?'/'+item.id:''}`,{method:item.id?'PATCH':'POST',body:JSON.stringify(d)});$('#modal').close();toast('Saved');await go(kind)}}
 async function launchBrowser(slug,url){await api(`/browser/${slug}/open`,{method:'POST',body:JSON.stringify({url})});toast(`${agent(slug).name} browser opened in its own Chrome profile`)}
+// ── Inbox: company replies caught by the email trigger ──────────────────────
+const inboxState={items:[],summary:null,filter:'open',open:{}};
+const INBOX_CATEGORIES={
+ interview_invite:['green','Interview invitation'],
+ assessment:['blue','Assessment / test'],
+ offer:['green','Offer'],
+ rejection:['red','Rejection'],
+ document_request:['orange','Documents requested'],
+ acknowledgement:['blue','Application acknowledged'],
+ recruiter_outreach:['purple','Recruiter outreach'],
+ other:['blue','Uncategorised']
+};
+const INBOX_STATUS={
+ new:['orange','Needs triage'],drafted:['blue','Draft ready'],
+ awaiting_approval:['orange','Waiting for your approval'],approved:['blue','Approved — awaiting send'],
+ sent:['green','Sent (confirmed)'],denied:['red','Denied'],archived:['blue','Archived']
+};
+const INBOX_OPEN=['new','drafted','awaiting_approval','approved'];
+function inboxWhen(value){if(!value)return '';const d=new Date(value);return isNaN(d)?value:d.toLocaleString()}
+function inboxPill(map,key){const [tone,label]=map[key]||['blue',key||'—'];return `<span class="pill ${tone}">${esc(label)}</span>`}
+async function inboxPage(){
+ const [items,summary]=await Promise.all([api('/inbox'),api('/inbox/summary')]);
+ inboxState.items=items;inboxState.summary=summary;
+ const filtered=inboxState.filter==='open'?items.filter(e=>INBOX_OPEN.includes(e.status))
+   :inboxState.filter==='all'?items:items.filter(e=>e.status===inboxState.filter);
+ const waiting=items.filter(e=>e.status==='awaiting_approval').length;
+ const setup=summary.ingest_configured?'':`<div class="notice section-gap"><strong>The email trigger is not armed yet.</strong> Set <code>AGENTICOS_INGEST_TOKEN</code> in your environment, restart the server, then point the n8n workflow at <code>POST /api/inbox/ingest</code> with the header <code>X-AgenticOS-Token</code>. Full steps are in <code>docs/INBOX-EMAIL-TRIGGER.md</code>.</div>`;
+ const filters=[['open',`Open (${items.filter(e=>INBOX_OPEN.includes(e.status)).length})`],['awaiting_approval',`Waiting (${waiting})`],['sent',`Sent (${items.filter(e=>e.status==='sent').length})`],['archived','Archived'],['all',`All (${items.length})`]];
+ return shell(head('INBOX','Company replies land here, never in your outbox.',
+   'n8n watches the mailbox and posts each reply in. AgenticOS classifies it locally, drafts an answer, and holds it until you approve. Sending happens in n8n, and the reply is only marked sent once it reports back a real message id.')
+  +setup
+  +`<div class="inbox-filters section-gap">${filters.map(([id,label])=>`<button class="button small ${inboxState.filter===id?'primary':''}" data-inbox-filter="${id}">${esc(label)}</button>`).join('')}</div>`
+  +(filtered.length?filtered.map(inboxCard).join(''):`<div class="empty"><strong>Nothing here yet.</strong><p>Replies appear the moment the n8n workflow forwards one. Nothing is ever fetched or sent without you.</p></div>`));
+}
+function inboxCard(e){
+ const expanded=!!inboxState.open[e.id];
+ const signals=(e.signals||[]).length?`<p class="muted inbox-signals">Matched: ${(e.signals||[]).map(s=>`<code>${esc(s)}</code>`).join(' · ')}</p>`:'';
+ const automated=/no-?reply|donotreply|do-?not-?reply/i.test(e.from_address||'');
+ const editable=['new','drafted','denied'].includes(e.status)&&!automated;
+ const canDraft=e.status!=='sent'&&e.status!=='archived'&&!automated;
+ const body=`<div class="payload inbox-body" dir="auto">${esc(e.body||'(empty message)')}</div>`;
+ let controls='';
+ if(automated){
+  controls=`<p class="muted">Automated sender — a reply to <span class="mono">${esc(e.from_address)}</span> would not reach anyone, so nothing was drafted.</p>
+    <div class="actions"><button class="button small" data-inbox-archive="${e.id}">Archive</button></div>`;
+ }else if(editable){
+  controls=`<div class="actions">
+    <button class="button small" data-inbox-draft="${e.id}">Redraft offline</button>
+    <button class="button small" data-inbox-model="${e.id}">Improve with local model</button>
+    <button class="button primary" data-inbox-queue="${e.id}">Send for approval</button>
+    <button class="button small" data-inbox-archive="${e.id}">Archive</button></div>`;
+ }else if(e.status==='awaiting_approval'){
+  controls=`<div class="actions">
+    <button class="button primary" data-inbox-decide="approved" data-action="${esc(e.action_id||'')}">Approve this exact reply</button>
+    <button class="button danger" data-inbox-decide="denied" data-action="${esc(e.action_id||'')}">Deny</button></div>
+    <p class="muted">Approving hands the exact text above to your n8n workflow. It is marked sent only when n8n reports back the provider's message id.</p>`;
+ }else if(e.status==='approved'){
+  controls=`<p class="muted">Approved and handed to n8n. Waiting for a delivery confirmation — not sent yet as far as this OS knows.</p>`;
+ }else if(e.status==='sent'){
+  controls=`<p class="muted">Delivered ${esc(inboxWhen(e.replied_at))} · provider id <span class="mono">${esc(e.provider_message_id)}</span></p>`;
+ }
+ return `<section class="panel inbox-card section-gap">
+  <div class="panel-head">
+    <div><p class="eyebrow">${esc(e.company||e.from_address||'unknown sender')}</p>
+      <h2>${esc(e.subject||'(no subject)')}</h2>
+      <p class="muted">${esc(e.from_name||'')} &lt;${esc(e.from_address)}&gt; · ${esc(inboxWhen(e.received_at))}</p></div>
+    <div class="inbox-tags">${inboxPill(INBOX_CATEGORIES,e.category)}${inboxPill(INBOX_STATUS,e.status)}
+      <span class="mono">${Math.round((e.confidence||0)*100)}% confident</span></div>
+  </div>
+  ${signals}
+  <button class="button small" data-inbox-toggle="${e.id}">${expanded?'Hide original message':'Show original message'}</button>
+  ${expanded?body:''}
+  ${canDraft?`<div class="inbox-draft">
+    ${e.draft_body?'':`<p class="muted">No reply was drafted — nothing here needs answering. Write one yourself if you disagree.</p>`}
+    <label>Reply subject</label><input id="inbox-subject-${e.id}" dir="auto" value="${esc(e.draft_subject)}" ${editable?'':'readonly'}>
+    <label>Reply body ${e.draft_source?`<span class="muted">· drafted by ${esc(e.draft_source)}</span>`:''}</label>
+    <textarea id="inbox-body-${e.id}" dir="auto" rows="12" ${editable?'':'readonly'}>${esc(e.draft_body)}</textarea>
+    <p class="muted">Anything still in [square brackets] is a fact this OS does not know. Fill it in yourself — approval is blocked while a placeholder remains.</p>
+  </div>`:''}
+  ${controls}
+ </section>`;
+}
+function bindInbox(){
+ $$('[data-inbox-filter]').forEach(b=>b.onclick=()=>{inboxState.filter=b.dataset.inboxFilter;go('inbox')});
+ $$('[data-inbox-toggle]').forEach(b=>b.onclick=()=>{const id=b.dataset.inboxToggle;inboxState.open[id]=!inboxState.open[id];go('inbox')});
+ $$('[data-inbox-draft]').forEach(b=>b.onclick=async()=>{
+   b.disabled=true;try{const r=await api(`/inbox/${b.dataset.inboxDraft}/draft`,{method:'POST',body:JSON.stringify({})});toast(r.note||'Offline draft rebuilt');await go('inbox')}
+   catch(err){toast(err.message);b.disabled=false}});
+ $$('[data-inbox-model]').forEach(b=>b.onclick=async()=>{
+   b.disabled=true;b.textContent='Thinking…';
+   try{const r=await api(`/inbox/${b.dataset.inboxModel}/draft`,{method:'POST',body:JSON.stringify({use_model:true})});toast(r.note||'Draft improved by the local model');await go('inbox')}
+   catch(err){toast(err.message);b.disabled=false;b.textContent='Improve with local model'}});
+ $$('[data-inbox-queue]').forEach(b=>b.onclick=async()=>{
+   const id=b.dataset.inboxQueue;
+   const payload={subject:$(`#inbox-subject-${id}`).value,body:$(`#inbox-body-${id}`).value};
+   b.disabled=true;
+   try{await api(`/inbox/${id}/queue`,{method:'POST',body:JSON.stringify(payload)});toast('Sent to the review desk — approve it to release the reply');await loadBase();await go('inbox')}
+   catch(err){toast(err.message);b.disabled=false}});
+ $$('[data-inbox-decide]').forEach(b=>b.onclick=async()=>{
+   if(!b.dataset.action)return toast('This reply has no approval card; redraft it first');
+   b.disabled=true;
+   try{await api(`/actions/${b.dataset.action}/decision`,{method:'POST',body:JSON.stringify({decision:b.dataset.inboxDecide})});
+     toast(b.dataset.inboxDecide==='approved'?'Approved — n8n now has the reply':'Denied; nothing was sent');
+     await loadBase();await go('inbox')}
+   catch(err){toast(err.message);b.disabled=false}});
+ $$('[data-inbox-archive]').forEach(b=>b.onclick=async()=>{
+   await api(`/inbox/${b.dataset.inboxArchive}/archive`,{method:'POST',body:'{}'});toast('Archived');await go('inbox')});
+}
+
 function bind(){$$('[data-page]').forEach(b=>b.onclick=()=>go(b.dataset.page));$$('[data-open-agent]').forEach(b=>b.onclick=()=>go(b.dataset.openAgent));$$('[data-agent-tab]').forEach(b=>b.onclick=e=>{$$('.tab-btn').forEach(btn=>btn.classList.remove('active'));e.target.classList.add('active');const slug=b.dataset.agentTab;$$('.agent-tab-panel').forEach(p=>p.style.display='none');$(`#agent-panel-${slug}`).style.display='flex'});$$('[data-edit-agent]').forEach(b=>b.onclick=()=>agentForm(agent(b.dataset.editAgent)));if($('#add-agent'))$('#add-agent').onclick=()=>agentForm();if($('#quick-agent-btn'))$('#quick-agent-btn').onclick=quickAgentModal;if($('#chat-form'))$('#chat-form').onsubmit=async e=>{e.preventDefault();const btn=e.target.querySelector('button');btn.disabled=true;btn.textContent='Thinking…';try{await api(`/agents/${state.current}/messages`,{method:'POST',body:JSON.stringify({content:$('#chat-text').value,target_agent:$('#chat-target')?.value||null})});await go(state.current)}catch(err){toast(err.message);btn.disabled=false}};if($('#chat-text')){$('#chat-text').parentElement.insertAdjacentHTML('beforeend',`<div class="voice-bar"><button type="button" id="stt-btn" class="icon-button" title="Hold to speak">🎤</button><button type="button" id="tts-btn" class="icon-button" title="Read last reply aloud">🔊</button></div>`);const sttBtn=$('#stt-btn'),ttsBtn=$('#tts-btn'),chatText=$('#chat-text');let sttHold=false;sttBtn.addEventListener('mousedown',()=>{sttHold=true;sttStart('en-US',t=>{chatText.value=(chatText.value+t).trim()},e=>toast('STT: '+e))});sttBtn.addEventListener('mouseup',()=>{sttHold=false;sttStop()});sttBtn.addEventListener('mouseleave',()=>{if(sttHold){sttHold=false;sttStop()}});ttsBtn.onclick=()=>{const last=$('.message.assistant:last-child');if(last)tts(last.textContent);else toast('No reply to read')}}$$('[data-browser]').forEach(b=>b.onclick=()=>launchBrowser(b.dataset.browser,'about:blank'));$$('[data-browser-url]').forEach(b=>b.onclick=()=>launchBrowser(b.dataset.browserUrl,$('#browser-url').value));$$('[data-browser-input]').forEach(b=>b.onclick=()=>launchBrowser(b.dataset.browserInput,$(`#url-${b.dataset.browserInput}`).value));$$('[data-add-resource]').forEach(b=>b.onclick=()=>resourceForm(b.dataset.addResource));$$('[data-edit-resource]').forEach(b=>b.onclick=()=>resourceForm(b.dataset.editResource,state.resources[b.dataset.editResource].find(x=>x.id===b.dataset.id)));$$('[data-delete-resource]').forEach(b=>b.onclick=async()=>{if(confirm('Delete this local record?')){await api(`/resources/${b.dataset.deleteResource}/${b.dataset.id}`,{method:'DELETE'});go(b.dataset.deleteResource)}});$$('[data-save-model]').forEach(b=>b.onclick=async()=>{const s=b.dataset.saveModel;await api(`/agents/${s}`,{method:'PATCH',body:JSON.stringify({model_provider:$(`#provider-${s}`).value,model_id:$(`#model-${s}`).value,free_only:$(`#free-${s}`).checked})});toast('Model routing saved');await go('models')});$$('[data-decision]').forEach(b=>b.onclick=async()=>{await api(`/actions/${b.dataset.action}/decision`,{method:'POST',body:JSON.stringify({decision:b.dataset.decision})});toast(`Action ${b.dataset.decision}`);await go('approvals')});if($('#action-form'))$('#action-form').onsubmit=async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));try{d.payload=JSON.parse(d.payload)}catch{return toast('Action details must be valid JSON')}await api('/actions',{method:'POST',body:JSON.stringify(d)});toast('Review item created');await go('approvals')};if($('#upload-open'))$('#upload-open').onclick=()=>{modal('Upload context','LOCAL FILES',`<form id="upload-form"><label>Give file to</label><select name="agent_slug">${state.agents.map(a=>`<option value="${a.slug}">${esc(a.name)}</option>`).join('')}</select><label>File (maximum 25 MB)</label><input type="file" name="file" required><div class="actions"><button class="button primary">Upload locally</button></div></form>`);$('#upload-form').onsubmit=async e=>{e.preventDefault();const d=new FormData(e.target);await api('/upload',{method:'POST',body:d});$('#modal').close();toast('File uploaded locally');go('files')}};if($('#add-news'))$('#add-news').onclick=()=>{modal('Add verified story','TECH NEWS',`<form id="news-form"><label>Title</label><input name="title" required><label>Summary</label><textarea name="summary"></textarea><label>Source URL</label><input name="url" type="url" required><div class="actions"><button class="button primary">Add story</button></div></form>`);$('#news-form').onsubmit=async e=>{e.preventDefault();await api('/news',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});$('#modal').close();go('tech-news')}};if($('#fetch-feed'))$('#fetch-feed').onclick=()=>{modal('Fetch RSS or Atom feed','TECH NEWS',`<form id="feed-form"><label>Feed name</label><input name="name" value="Tech feed"><label>Feed URL</label><input name="url" type="url" required placeholder="https://example.com/feed.xml"><div class="actions"><button class="button primary">Fetch now</button></div></form>`);$('#feed-form').onsubmit=async e=>{e.preventDefault();const r=await api('/news/fetch',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});$('#modal').close();toast(`${r.added} stories added`);go('tech-news')}};$$('[data-script]').forEach(b=>b.onclick=async()=>{const s=await api(`/news/${b.dataset.script}/script`,{method:'POST',body:'{}'});$(`#script-${b.dataset.script}`).innerHTML=`<div class="script-output">${esc(s.script)}</div><button class="button small" data-copy-script>Copy script</button>`;$(`#script-${b.dataset.script} [data-copy-script]`).onclick=()=>navigator.clipboard.writeText(s.script).then(()=>toast('Script copied'))});if($('#n8n-add-wh'))$('#n8n-add-wh').onclick=()=>resourceForm('n8n_webhooks');if($('#n8n-refresh-status'))$('#n8n-refresh-status').onclick=()=>go('n8n');$$('[data-test-wh]').forEach(b=>b.onclick=async()=>{const r=await api(`/n8n/webhooks/${b.dataset.testWh}/test`,{method:'POST'});toast(r.ok?`Test OK (${r.status})`:`Test failed: ${r.error}`)});if($('#tg-check'))$('#tg-check').onclick=telegramCheck;$$('[data-tg-unlink]').forEach(b=>b.onclick=async()=>{if(confirm('Unlink this Telegram chat?')){await api(`/telegram/unlink`,{method:'POST',body:JSON.stringify({chat_id:b.dataset.tgUnlink})});await go('telegram')}});$$('[data-delegate-do]').forEach(b=>b.onclick=async()=>{const d=b.dataset.delegateDo;const all=await api('/delegations');const del=all.find(x=>x.id===d);if(!del){toast('Task not found');return}await api(`/delegations/${d}`,{method:'PATCH',body:JSON.stringify({status:'in_progress'})});toast(`Opening @${del.target_agent} with task…`);go(`agent-panel`);setTimeout(()=>openAgent(del.target_agent),300)});$$('[data-delegate-dismiss]').forEach(b=>b.onclick=async()=>{await api(`/delegations/${b.dataset.delegateDismiss}`,{method:'PATCH',body:JSON.stringify({status:'dismissed'})});toast('Task dismissed');await go('delegations')})}
 function commandOpen(){const items=groups.flatMap(g=>g[1]);const renderResults=()=>{const q=$('#command-input').value.toLowerCase();$('#command-results').innerHTML=items.filter(x=>x[2].toLowerCase().includes(q)).map(x=>`<button class="command-result" data-command-page="${x[0]}">${x[1]} &nbsp; ${x[2]}</button>`).join('');$$('[data-command-page]').forEach(b=>b.onclick=()=>{$('#command').close();go(b.dataset.commandPage)})};$('#command-input').value='';renderResults();$('#command').showModal();$('#command-input').focus();$('#command-input').oninput=renderResults}
 $('#menu-button').onclick=()=>$('#sidebar').classList.toggle('open');$('#command-button').onclick=commandOpen;document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();commandOpen()}});window.addEventListener('hashchange',()=>{const p=location.hash.slice(1);if(p&&p!==state.current)go(p)});initPageAgent();go(location.hash.slice(1)||'overview');

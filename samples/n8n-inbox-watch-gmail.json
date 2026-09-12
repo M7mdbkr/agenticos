@@ -1,0 +1,72 @@
+{
+  "name": "AgenticOS — Watch inbox for company replies",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "readStatus": "unread",
+          "q": "category:primary newer_than:14d -from:me"
+        },
+        "options": {}
+      },
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Keep only mail that plausibly relates to a job application, and reshape it\n// into the payload AgenticOS expects. Classification happens in AgenticOS, not here.\nconst KEYWORDS = [\n  'application', 'applied', 'candidate', 'position', 'vacancy', 'role',\n  'interview', 'assessment', 'offer', 'recruit', 'hiring', 'careers', 'cv', 'resume',\n  'وظيف', 'تقديم', 'مقابلة', 'توظيف', 'طلب', 'اختبار', 'شاغر'\n];\n\nconst out = [];\nfor (const item of $input.all()) {\n  const mail = item.json;\n  const headers = mail.headers || {};\n  const subject = mail.subject || headers.subject || '';\n  const body = mail.text || mail.textPlain || mail.snippet || '';\n  const fromRaw = mail.from?.value?.[0] || {};\n  const fromAddress = fromRaw.address || headers.from || '';\n  const haystack = `${subject}\\n${body}`.toLowerCase();\n\n  if (!KEYWORDS.some(k => haystack.includes(k))) continue;\n\n  out.push({\n    json: {\n      message_id: mail.id || headers['message-id'] || '',\n      source: 'gmail',\n      from_name: fromRaw.name || '',\n      from_address: fromAddress,\n      to_address: mail.to?.value?.[0]?.address || '',\n      subject,\n      body: body.slice(0, 20000),\n      received_at: mail.date || headers.date || new Date().toISOString()\n    }\n  });\n}\nreturn out;"
+      },
+      "name": "Keep job-related mail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8765/api/inbox/ingest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameter": [
+            {
+              "name": "X-AgenticOS-Token",
+              "value": "={{ $env.AGENTICOS_INGEST_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "name": "POST to AgenticOS inbox",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [740, 300],
+      "notes": "The token comes from n8n's own environment, never from this file. If n8n runs in Docker, use http://host.docker.internal:8765 and set AGENTICOS_EXTRA_HOSTS=host.docker.internal:8765 on the AgenticOS side."
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [[{ "node": "Keep job-related mail", "type": "main", "index": 0 }]]
+    },
+    "Keep job-related mail": {
+      "main": [[{ "node": "POST to AgenticOS inbox", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "id": "agenticos-inbox-watch"
+}

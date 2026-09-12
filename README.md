@@ -5,9 +5,10 @@ A local-first personal agent operating system built around explicit consent, vis
 ## What it demonstrates
 
 - Specialist workspaces for CEO, job, email, and technology-news workflows
+- An Inbox that triages incoming company replies offline and drafts an answer for review
 - Approval cards before any external action
 - SQLite state and a SHA-256 audit chain for operational events
-- Optional Telegram and n8n integrations
+- Optional Telegram and n8n integrations, including an n8n-driven email trigger
 - Local context library, schedules, and page-agent interactions
 - Loopback-only defaults for local development
 

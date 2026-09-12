@@ -139,7 +139,27 @@ Create a `.env` file in the Personal-OS folder:
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ
 NOTION_API_KEY=secret_abc123...
 N8N_WEBHOOK_URL=https://your-n8n.com/webhook/
+
+# Email trigger (see docs/INBOX-EMAIL-TRIGGER.md)
+AGENTICOS_INGEST_TOKEN=generate-with-secrets-token_urlsafe-32
+AGENTICOS_OWNER_NAME=Mohammad J. Bakr
+# Only if n8n runs in Docker:
+# AGENTICOS_EXTRA_HOSTS=host.docker.internal:8765
 ```
+
+---
+
+## 8. Email trigger — company replies
+
+When a company answers an application, n8n posts the mail to AgenticOS, which
+classifies it locally and drafts a reply you approve before anything is sent.
+
+1. Generate a token: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
+2. Put it in `.env` as `AGENTICOS_INGEST_TOKEN`, restart the server
+3. Import `samples/n8n-inbox-watch-gmail.json` and `samples/n8n-inbox-send-approved-reply.json`
+4. Open the **Inbox** page in the sidebar
+
+Full walkthrough, API reference and hardware notes: `docs/INBOX-EMAIL-TRIGGER.md`
 
 ---
 

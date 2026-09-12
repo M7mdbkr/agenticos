@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import argparse
 import cgi
+import hmac
 import json
 import mimetypes
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -42,6 +44,36 @@ TELEGRAM_POLLING_RUNNING = False
 TELEGRAM_POLLING_STOP = threading.Event()
 TELEGRAM_PENDING = []  # incoming updates from polling thread
 TELEGRAM_LOCK = threading.Lock()
+
+# Paths an automation runner (n8n) may reach from outside the loopback name.
+# Everything else stays strictly 127.0.0.1/localhost.
+INGEST_PATHS = ("/api/inbox/ingest",)
+
+
+def ingest_hosts():
+    """Extra Host headers accepted on the ingest paths only.
+
+    Needed when n8n runs in Docker and reaches the OS as host.docker.internal.
+    Set AGENTICOS_EXTRA_HOSTS="host.docker.internal:8765" to allow it; the
+    ingest token is still required, so widening the name alone grants nothing.
+    """
+    raw = os.environ.get("AGENTICOS_EXTRA_HOSTS", "")
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+
+
+def ingest_authorised(headers):
+    """Constant-time check of the shared ingest secret.
+
+    The token lives in the environment only — never in SQLite, source or logs.
+    Missing configuration fails closed rather than leaving the path open.
+    """
+    expected = os.environ.get("AGENTICOS_INGEST_TOKEN", "").strip()
+    if not expected:
+        return False, "Email ingest is disabled. Set AGENTICOS_INGEST_TOKEN in the environment first."
+    supplied = headers.get("X-AgenticOS-Token", "") or ""
+    if not hmac.compare_digest(supplied, expected):
+        return False, "Invalid ingest token."
+    return True, ""
 
 
 def store_request(method):
@@ -172,9 +204,13 @@ class Handler(BaseHTTPRequestHandler):
             return False
         port = cast(ThreadingHTTPServer, self.server).server_port
         hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
-        if self.headers.get("Host") not in hosts:
-            self.send_json({"error": "Localhost access only"}, 403)
-            return False
+        host_header = (self.headers.get("Host") or "").lower()
+        if host_header not in hosts:
+            request_path = urlparse(self.path).path
+            allowed_elsewhere = request_path in INGEST_PATHS and host_header in ingest_hosts()
+            if not allowed_elsewhere:
+                self.send_json({"error": "Localhost access only"}, 403)
+                return False
         origin = self.headers.get("Origin")
         if (origin and origin not in {f"http://{host}" for host in hosts}) or self.headers.get("Sec-Fetch-Site") == "cross-site":
             self.send_json({"error": "Cross-origin access is not allowed"}, 403)
@@ -249,6 +285,15 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json({"connected": True, "base_url": base, "version": data.get("version", "unknown")})
                 except Exception:
                     return self.send_json({"connected": False, "base_url": base})
+            if path == "/api/inbox":
+                status = parse_qs(parsed.query).get("status", [None])[0]
+                return self.send_json(STORE.list_inbox(status))
+            if path == "/api/inbox/summary":
+                summary = STORE.inbox_summary()
+                summary["ingest_configured"] = bool(os.environ.get("AGENTICOS_INGEST_TOKEN", "").strip())
+                return self.send_json(summary)
+            if path.startswith("/api/inbox/") and len(path.split("/")) == 4:
+                return self.send_json(STORE.get_email(path.split("/")[3]))
             if path == "/api/activity": return self.send_json(STORE.recent_activity())
             if path == "/api/telegram/status":
                 return self.send_json({
@@ -554,7 +599,124 @@ class Handler(BaseHTTPRequestHandler):
             env_path.write_text("\n".join(new_lines) + "\n")
             os.environ["NOTION_API_KEY"] = api_key
             return self.send_json({"ok": True, "note": "Notion API key saved. Restart server to activate."})
+        if path.startswith("/api/inbox"):
+            return self.inbox_request(path)
         return self.post_resource()
+
+    # ── Inbox: company replies arriving from the automation runner ──────────
+
+    def inbox_request(self, path):
+        """POST routes for the Inbox page.
+
+        Deliberately outside @store_request: drafting can call a local model,
+        and holding the global store lock for a 120-second model call would
+        freeze every other page. The database work below takes the lock itself.
+        """
+        import inbox as triage
+
+        parts = path.split("/")
+        try:
+            if path == "/api/inbox/ingest":
+                allowed, reason = ingest_authorised(self.headers)
+                if not allowed:
+                    return self.send_json({"error": reason}, 401)
+                data = self.body_json()
+                subject = str(data.get("subject") or "")
+                body = str(data.get("body") or "")
+                verdict = triage.classify(subject, body)
+                record = dict(data)
+                record.update(verdict)
+                record.setdefault("company", triage.company_from_address(
+                    str(data.get("from_address") or ""), str(data.get("from_name") or "")))
+                with STORE_LOCK:
+                    email = STORE.ingest_email(record)
+                    if email.get("duplicate"):
+                        return self.send_json({"ok": True, "duplicate": True, "id": email["id"],
+                                               "category": email["category"]})
+                    # Offline template only — fast, deterministic, no model call
+                    # on the ingest path so n8n never waits on Ollama.
+                    draft = triage.draft_reply(email, role=str(data.get("role") or ""))
+                    if draft["body"]:
+                        email = STORE.update_email(email["id"], {
+                            "draft_subject": draft["subject"], "draft_body": draft["body"],
+                            "draft_source": draft["source"], "status": "drafted"})
+                return self.send_json({"ok": True, "duplicate": False, "id": email["id"],
+                                       "category": email["category"],
+                                       "confidence": email["confidence"],
+                                       "drafted": bool(email.get("draft_body")),
+                                       "note": draft.get("note", "")}, 201)
+
+            if len(parts) == 5 and parts[4] == "draft":
+                data = self.body_json()
+                with STORE_LOCK:
+                    email = STORE.get_email(parts[3])
+                draft = triage.draft_reply(email, role=str(data.get("role") or ""))
+                if not draft["body"]:
+                    return self.send_json({"error": draft.get("note") or "No reply is expected for this email."}, 400)
+                note = draft.get("note", "")
+                if data.get("use_model"):
+                    model = str(data.get("model") or "").strip()
+                    if not model:
+                        with STORE_LOCK:
+                            agent = STORE.get_agent(str(data.get("agent_slug") or "job"))
+                        model = agent["model_id"] if agent["model_provider"] == "ollama" else "qwen2.5:7b"
+                    with BRAIN_SLOTS:
+                        refined = triage.refine_with_model(draft["body"], email.get("body", ""), model)
+                    draft["body"], draft["source"], note = refined["body"], refined["source"], refined["note"]
+                with STORE_LOCK:
+                    email = STORE.update_email(email["id"], {
+                        "draft_subject": draft["subject"], "draft_body": draft["body"],
+                        "draft_source": draft["source"],
+                        "status": "drafted" if email["status"] in ("new", "drafted") else email["status"]})
+                return self.send_json({"ok": True, "email": email, "note": note})
+
+            if len(parts) == 5 and parts[4] == "queue":
+                data = self.body_json()
+                with STORE_LOCK:
+                    email = STORE.get_email(parts[3])
+                    body = str(data.get("body") or email["draft_body"]).strip()
+                    subject = str(data.get("subject") or email["draft_subject"]).strip()
+                    if not body or not subject:
+                        return self.send_json({"error": "Write the reply before sending it for approval."}, 400)
+                    if triage.is_automated(email["from_address"]):
+                        return self.send_json({"error": "This sender is a no-reply address; a reply would not reach anyone."}, 400)
+                    placeholder = re.search(r"\[[^\]]{3,}\]", body)
+                    if placeholder:
+                        return self.send_json({"error": f"Fill in {placeholder.group(0)} before sending for approval."}, 400)
+                    agent_slug = str(data.get("agent_slug") or "job")
+                    action = STORE.create_action(agent_slug, "send_email", {
+                        "summary": f"Reply to {email['from_address']} — {email['category']}",
+                        "inbox_email_id": email["id"],
+                        "to": email["from_address"],
+                        "subject": subject,
+                        "body": body,
+                        "in_reply_to": email["message_id"],
+                        "delivery": "Sent by the configured n8n workflow after approval. AgenticOS does not send mail itself.",
+                    })
+                    email = STORE.update_email(email["id"], {
+                        "draft_subject": subject, "draft_body": body,
+                        "action_id": action["id"], "status": "awaiting_approval"})
+                return self.send_json({"ok": True, "email": email, "action": action}, 201)
+
+            if len(parts) == 5 and parts[4] == "sent":
+                # Delivery confirmation from the automation that actually sent it.
+                allowed, reason = ingest_authorised(self.headers)
+                if not allowed:
+                    return self.send_json({"error": reason}, 401)
+                data = self.body_json()
+                with STORE_LOCK:
+                    email = STORE.mark_email_sent(parts[3], str(data.get("provider_message_id") or ""))
+                return self.send_json({"ok": True, "email": email})
+
+            if len(parts) == 5 and parts[4] == "archive":
+                with STORE_LOCK:
+                    return self.send_json(STORE.update_email(parts[3], {"status": "archived"}))
+
+            return self.send_json({"error": "Not found"}, 404)
+        except KeyError as exc:
+            return self.send_json({"error": str(exc)}, 404)
+        except (ValueError, TypeError) as exc:
+            return self.send_json({"error": str(exc)}, 400)
 
     def page_agent_edit(self):
         """Edit a page element via CSS injection — safe, no external calls."""
@@ -636,6 +798,21 @@ class Handler(BaseHTTPRequestHandler):
             return {"css": "#page-agent-toggle { display: flex !important; }", "description": "Showed the Page Agent button."}
         # Fallback
         return {"message": f"I understood '{instruction}' but don't know how to apply that as a page edit yet. Try: change color, hide sidebar, bigger text, dark mode, center content, shadow, rounded corners."}
+
+    def _sync_inbox_decision(self, action) -> None:
+        """Move the inbox record in step with its approval card.
+
+        An approved reply becomes "approved", not "sent": it is only sent once
+        the automation calls back with the provider's message id.
+        """
+        email_id = (action.get("payload") or {}).get("inbox_email_id")
+        if not email_id:
+            return
+        status = "approved" if action["status"] == "approved" else "denied"
+        try:
+            STORE.update_email(email_id, {"status": status})
+        except KeyError:
+            pass  # the email was deleted after the card was raised
 
     def _notify_job_approved(self, app: Dict[str, Any]) -> None:
         """POST job application details to n8n webhooks when user approves."""
@@ -783,7 +960,10 @@ BODY: <email body>"""
             if path == "/api/actions":
                 data = self.body_json(); return self.send_json(STORE.create_action(data["agent_slug"], data["action_type"], data.get("payload", {})), 201)
             if path.startswith("/api/actions/") and path.endswith("/decision"):
-                parts = path.split("/"); return self.send_json(STORE.decide_action(parts[3], self.body_json()["decision"]))
+                parts = path.split("/")
+                action = STORE.decide_action(parts[3], self.body_json()["decision"])
+                self._sync_inbox_decision(action)
+                return self.send_json(action)
             if path.startswith("/api/resources/"):
                 return self.send_json(STORE.create_resource(path.split("/")[3], self.body_json()), 201)
             if path == "/api/upload":
@@ -887,6 +1067,10 @@ BODY: <email body>"""
                 parts = path.split("/")
                 if len(parts) == 4 and parts[3]:
                     return self.send_json(STORE.update_job_application(parts[3], self.body_json()))
+            if path.startswith("/api/inbox/"):
+                parts = path.split("/")
+                if len(parts) == 4 and parts[3]:
+                    return self.send_json(STORE.update_email(parts[3], self.body_json()))
             self.send_json({"error": "Not found"}, 404)
         except (KeyError, ValueError) as exc: self.send_json({"error": str(exc)}, 400)
 
@@ -900,6 +1084,10 @@ BODY: <email body>"""
                 parts = path.split("/")
                 if len(parts) == 4 and parts[3]:
                     STORE.delete_job_application(parts[3]); return self.send_json({"deleted": True})
+            if path.startswith("/api/inbox/"):
+                parts = path.split("/")
+                if len(parts) == 4 and parts[3]:
+                    STORE.delete_email(parts[3]); return self.send_json({"deleted": True})
             self.send_json({"error": "Not found"}, 404)
         except (KeyError, ValueError) as exc: self.send_json({"error": str(exc)}, 400)
 
