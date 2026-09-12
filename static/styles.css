@@ -30,6 +30,7 @@
   --purple-glow:  rgba(88,86,214,0.3);
 
   /* Borders & shadows */
+  --card:         #1c1c1e;
   --border:       rgba(255,255,255,0.08);
   --border-2:     rgba(255,255,255,0.14);
   --shadow-sm:    0 2px 8px rgba(0,0,0,0.4);
@@ -1125,3 +1126,21 @@ dialog::backdrop {
   .inbox-card .panel-head{flex-direction:column}
   .inbox-tags{justify-content:flex-start}
 }
+
+/* ── n8n setup screen ──────────────────────────── */
+.n8n-steps{list-style:none;margin:16px 0 0;padding:0;display:flex;flex-direction:column;gap:2px}
+.n8n-step{display:grid;grid-template-columns:26px 1fr;gap:12px;padding:12px 0;border-bottom:1px solid var(--border);align-items:start}
+.n8n-step:last-child{border-bottom:0}
+.n8n-step-mark{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:12px;font-weight:700;margin-top:2px}
+.n8n-step.ok     .n8n-step-mark{background:rgba(52,199,89,0.16);color:var(--green)}
+.n8n-step.todo   .n8n-step-mark{background:rgba(255,149,0,0.16);color:var(--orange)}
+.n8n-step.manual .n8n-step-mark{background:var(--surface-2);color:var(--ink-2)}
+.n8n-step strong{font-size:14px;display:block}
+.n8n-step p{margin:2px 0 0;font-size:13px;color:var(--ink-2);line-height:1.6}
+.n8n-endpoint{margin-top:18px;padding:14px;background:var(--surface-2);border-radius:10px}
+.n8n-endpoint > label{display:block;font-size:12px;color:var(--ink-2);margin-bottom:8px}
+.n8n-endpoint-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.n8n-endpoint-row code{flex:1;min-width:220px;font-family:var(--mono);font-size:12px;background:var(--surface);padding:8px 10px;border-radius:6px;overflow-x:auto;white-space:nowrap}
+.n8n-endpoint .muted{margin-top:8px;font-size:12px}
+.n8n-frame-fallback{padding:28px;text-align:center;display:flex;flex-direction:column;gap:10px;align-items:center}
+.n8n-frame-fallback p{max-width:52ch;font-size:13px;line-height:1.7}

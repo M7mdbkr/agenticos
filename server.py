@@ -278,13 +278,24 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/n8n/status":
                 import urllib.request
                 base = os.environ.get("N8N_BASE_URL", "http://localhost:5678")
+                port = cast(ThreadingHTTPServer, self.server).server_port
+                setup = {
+                    "base_url": base,
+                    # Whether the email trigger is armed. The token itself is never sent.
+                    "ingest_configured": bool(os.environ.get("AGENTICOS_INGEST_TOKEN", "").strip()),
+                    "ingest_url": f"http://127.0.0.1:{port}/api/inbox/ingest",
+                    "extra_hosts": sorted(ingest_hosts()),
+                    "samples": [f.name for f in sorted((ROOT / "samples").glob("n8n-*.json"))],
+                    "webhooks": len([w for w in STORE.list_resources("n8n_webhooks") if w.get("enabled")]),
+                }
                 try:
                     req = urllib.request.Request(base + "/rest/settings", headers={"Accept": "application/json"})
                     with urllib.request.urlopen(req, timeout=3) as r:
                         data = json.loads(r.read())
-                    return self.send_json({"connected": True, "base_url": base, "version": data.get("version", "unknown")})
+                    setup.update({"connected": True, "version": data.get("version", "unknown")})
                 except Exception:
-                    return self.send_json({"connected": False, "base_url": base})
+                    setup["connected"] = False
+                return self.send_json(setup)
             if path == "/api/inbox":
                 status = parse_qs(parsed.query).get("status", [None])[0]
                 return self.send_json(STORE.list_inbox(status))
