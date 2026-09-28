@@ -135,6 +135,41 @@ def cmd_doctor(args) -> int:
     return 1 if any(c["status"] == "fail" for c in checks) else 0
 
 
+DASHBOARD = "http://127.0.0.1:8765/dashboard"
+
+
+def cmd_dashboard(args) -> int:
+    """Open the dashboard; start the local server first if it isn't running."""
+    import time
+    import urllib.request
+    import webbrowser
+
+    def up() -> bool:
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:8765/api/health", timeout=2):
+                return True
+        except Exception:
+            return False
+
+    if not up():
+        log = ROOT / "data" / "jobhunter" / "server.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen([sys.executable, str(ROOT / "server.py")], cwd=ROOT, env={**os.environ, "JOBHUNTER_AUTOSTART": "1"},
+                         stdout=open(log, "a"), stderr=subprocess.STDOUT, start_new_session=True)
+        for _ in range(20):
+            time.sleep(0.5)
+            if up():
+                break
+    print(f"Dashboard: {DASHBOARD}")
+    webbrowser.open(DASHBOARD)
+    return 0
+
+
+def cmd_organize(args) -> int:
+    print(_hunter().organize_existing(args.days))
+    return 0
+
+
 def cmd_card(args) -> int:
     hunter = _hunter()
     for item in args.photos:
@@ -173,7 +208,8 @@ def cmd_install_service(args) -> int:
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>com.agenticos.jobhunter</string>
-  <key>ProgramArguments</key><array><string>{python}</string><string>-m</string><string>jobhunter</string><string>run</string></array>
+  <key>ProgramArguments</key><array><string>{python}</string><string>{ROOT / 'server.py'}</string></array>
+  <key>EnvironmentVariables</key><dict><key>JOBHUNTER_AUTOSTART</key><string>1</string></dict>
   <key>WorkingDirectory</key><string>{ROOT}</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -192,7 +228,8 @@ After=network-online.target
 
 [Service]
 WorkingDirectory={ROOT}
-ExecStart={python} -m jobhunter run
+Environment=JOBHUNTER_AUTOSTART=1
+ExecStart={python} {ROOT / 'server.py'}
 Restart=always
 RestartSec=30
 
@@ -212,7 +249,8 @@ WantedBy=default.target
         return 0
     for command in commands:
         subprocess.run(command, check=False)
-    print(f"Job Hunter now starts with your laptop and keeps running. Stop it with: {stop}")
+    print(f"Job Hunter now starts with your laptop and keeps running. Dashboard: {DASHBOARD}")
+    print(f"Stop it with: {stop}")
     return 0
 
 
@@ -236,6 +274,10 @@ def main(argv=None) -> int:
     doctor = sub.add_parser("doctor", help="check email, every job site, brain, card reader and service")
     doctor.add_argument("--offline", action="store_true", help="skip network checks")
     doctor.set_defaults(func=cmd_doctor)
+    sub.add_parser("dashboard", help="open the dashboard in your browser").set_defaults(func=cmd_dashboard)
+    organize = sub.add_parser("organize", help="tidy the Gmail inbox: label job mail, move ads/newsletters out")
+    organize.add_argument("--days", type=int, default=30)
+    organize.set_defaults(func=cmd_organize)
     card = sub.add_parser("card", help="save business cards: photo files or typed details")
     card.add_argument("photos", nargs="+", help='photo paths, or text like "Ahmed, HR, Acme, ahmed@acme.com"')
     card.set_defaults(func=cmd_card)

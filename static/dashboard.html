@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Job Hunter Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<style>
+:root{--bg:#0f1115;--card:#181b22;--card2:#20242d;--line:#2c313c;--ink:#f2f4f8;--ink2:#a8afbd;--ink3:#6f7684;
+--blue:#3b82f6;--green:#22c55e;--orange:#f59e0b;--red:#ef4444;--purple:#a855f7;--r:14px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,"Segoe UI",Tahoma,sans-serif}
+a{color:var(--blue)}
+.wrap{max-width:1100px;margin:0 auto;padding:20px 16px 60px}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:18px}
+h1{font-size:24px}
+h2{font-size:18px;margin-bottom:10px}
+.muted{color:var(--ink2);font-size:13px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,.btn{border:1px solid var(--line);background:var(--card2);color:var(--ink);border-radius:10px;padding:8px 14px;font:inherit;font-size:14px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+button:hover,.btn:hover{border-color:var(--ink3)}
+button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+button.good{background:var(--green);border-color:var(--green);color:#04130a;font-weight:600}
+button.danger{color:var(--red)}
+button:disabled{opacity:.5;cursor:wait}
+.pill{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;background:var(--card2);border:1px solid var(--line);color:var(--ink2)}
+.pill.green{color:var(--green);border-color:#22c55e55}.pill.red{color:var(--red);border-color:#ef444455}
+.pill.orange{color:var(--orange);border-color:#f59e0b55}.pill.blue{color:var(--blue);border-color:#3b82f655}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px}
+.stat b{display:block;font-size:30px;line-height:1.1}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:12px}
+.alert{border-color:#f59e0b88;background:#2a2110}
+.alert.bad{border-color:#ef444488;background:#2a1414}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin:16px 0 12px;padding-bottom:4px}
+.tabs button{flex:none}
+.tabs button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.job h3{font-size:16px;margin:4px 0}
+.score{font-weight:700}
+.why{font-size:12px;color:var(--ink3);margin:6px 0}
+label{display:block;font-size:13px;color:var(--ink2);margin:10px 0 4px}
+input,select,textarea{width:100%;background:var(--card2);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:9px 12px;font:inherit}
+textarea{min-height:120px}
+input.ltr{direction:ltr;text-align:left}
+pre{white-space:pre-wrap;word-break:break-word;font:13px/1.55 -apple-system,Tahoma,sans-serif;background:var(--card2);border-radius:10px;padding:12px;max-height:60vh;overflow:auto}
+.steps li{margin:4px 0 4px 22px}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:12px;opacity:0;transition:.2s;pointer-events:none;max-width:90vw}
+.toast.on{opacity:1}
+dialog{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:var(--r);padding:18px;width:min(720px,94vw)}
+dialog::backdrop{background:#000a}
+.check{display:flex;gap:8px;align-items:center;color:var(--ink);font-size:14px}
+.check input{width:auto}
+.doc-row{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+@media(max-width:700px){.stats{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><h1>🔎 Job Hunter</h1><div class="muted" id="state">Loading…</div></div>
+    <div class="row" id="controls"></div>
+  </header>
+  <div id="alerts"></div>
+  <div class="stats" id="stats"></div>
+  <div class="tabs" id="tabs"></div>
+  <div id="view"></div>
+</div>
+<dialog id="dlg"><div id="dlgBody"></div><div class="row" style="margin-top:12px"><button onclick="dlg.close()">Close</button></div></dialog>
+<div class="toast" id="toast"></div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const S = {tab: localStorage.getItem('jh-tab') || 'jobs', status: null, profile: null, jobs: [], busy: {}};
+const STATUS_AR = {new:'New', notified:'Emailed to you', interested:'Saved', drafted:'Application ready', applied:'Applied',
+  interview:'Interview 🎉', assessment:'Assessment', offer:'Offer 🎉', rejected:'Rejected', skipped:'Skipped', closed:'Closed'};
+async function api(path, body, raw) {
+  const opt = body === undefined ? {} : {method:'POST', headers: raw ? raw : {'Content-Type':'application/json'}, body: raw ? body : JSON.stringify(body)};
+  const r = await fetch('/api/jobhunter' + path, opt);
+  let data; try { data = await r.json(); } catch { data = {error: 'Unexpected response from the agent'}; }
+  if (!r.ok) throw Error(data.error || data.message || 'Something went wrong');
+  return data;
+}
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('on'), 4000); }
+function show(title, html) { $('#dlgBody').innerHTML = `<h2>${title}</h2>${html}`; dlg.showModal(); }
+function ago(iso) {
+  if (!iso) return 'never';
+  const m = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (m < -1) return `in ${fmt(-m)}`; if (m < 1) return 'just now'; return `${fmt(m)} ago`;
+}
+const fmt = m => m < 60 ? `${m} min` : m < 2880 ? `${Math.round(m/60)} h` : `${Math.round(m/1440)} days`;
+
+async function load() {
+  const [status, profile, jobs] = await Promise.all([api('/status'), api('/profile'), api('/jobs?limit=400')]);
+  Object.assign(S, {status, profile, jobs});
+  render();
+}
+
+function render() {
+  const s = S.status, c = s.counts;
+  const on = s.running || s.service;
+  $('#state').innerHTML = `${on ? '<span class="pill green">● Running</span>' : '<span class="pill red">● Stopped</span>'}
+    ${s.paused ? '<span class="pill orange">Paused</span>' : ''}
+    ${s.email.configured ? `<span class="pill green">✉ Email connected</span>` : '<span class="pill red">✉ Email not connected</span>'}
+    · Last search: ${ago(s.last_search_at)} ${s.next_search_at && !s.paused ? '· Next: ' + ago(s.next_search_at) : ''}`;
+  $('#controls').innerHTML = `
+    ${s.running ? '<button onclick="act(\'stop\')">⏹ Stop</button>' : s.service ? '' : '<button class="good" onclick="act(\'start\')">▶ Start</button>'}
+    <button class="primary" onclick="act('run')" ${S.busy.run ? 'disabled' : ''}>${S.busy.run ? 'Searching…' : '🔎 Search now'}</button>
+    ${s.email.configured ? '<button onclick="act(\'inbox\')">📥 Check email</button><button onclick="act(\'organize\')">🧹 Tidy inbox</button>' : ''}
+    <button onclick="doctor()">🩺 Health check</button>`;
+  // problems first, in plain Arabic
+  const alerts = [];
+  if (!s.email.configured || s.last_error.includes('IMAP') || s.last_error.includes('SMTP'))
+    alerts.push(`<div class="card alert bad"><h2>✉ Email is not connected</h2>
+      <p>To email you jobs and read company replies, Gmail needs an <b>App Password</b> (16 letters) — not your normal password.</p>
+      <ol class="steps"><li>Sign in to Google as <b>mohammadbakerwork@gmail.com</b></li>
+      <li>Turn on <b>2-Step Verification</b>: <a href="https://myaccount.google.com/signinoptions/twosv" target="_blank">open</a> → Turn on → add your phone</li>
+      <li>Open <a href="https://myaccount.google.com/apppasswords" target="_blank">App passwords</a> → name it Job Hunter → Create → copy the 16 letters</li>
+      <li>Paste it here and press Connect:</li></ol>
+      <div class="row"><input class="ltr" id="appPw" placeholder="xxxx xxxx xxxx xxxx" style="max-width:260px"><button class="good" onclick="connectEmail()">Connect email</button></div>
+      ${s.last_error ? `<p class="muted" style="margin-top:8px">Last error: ${esc(s.last_error.includes('AUTHENTICATIONFAILED') ? 'Google rejected the password — create a new App Password from the same account' : s.last_error)}</p>` : ''}</div>`);
+  if (!s.ready) alerts.push('<div class="card alert">No target jobs set yet. Open <b>Settings</b> below.</div>');
+  if (!on) alerts.push('<div class="card alert">The agent is stopped, so it is not searching on its own. Press <b>▶ Start</b> above.</div>');
+  const locBad = (S.profile.locations || []).some(l => ['entry','mid','senior','any'].includes(l.toLowerCase()));
+  if (locBad) alerts.push('<div class="card alert bad">Your locations contain a mistake ("entry"). Open <b>Settings</b> and fix them.</div>');
+  $('#alerts').innerHTML = alerts.join('');
+  $('#stats').innerHTML = [
+    ['New matching jobs', c.new + c.notified + c.interested, 'var(--blue)'],
+    ['Waiting for your OK', s.drafts.length, 'var(--orange)'],
+    ['Applied', c.applied + c.drafted, 'var(--green)'],
+    ['Interviews & offers', c.interview + c.assessment + c.offer, 'var(--purple)'],
+  ].map(([t, n, col]) => `<div class="stat"><b style="color:${col}">${n}</b><span class="muted">${t}</span></div>`).join('');
+  const tabs = [['jobs','Jobs'],['drafts',`Waiting for OK ${s.drafts.length ? '('+s.drafts.length+')' : ''}`],['mine','My applications'],
+                ['cards','Cards & companies'],['settings','Settings'],['ask','Ask'],['log','Activity']];
+  $('#tabs').innerHTML = tabs.map(([k, t]) => `<button class="${S.tab === k ? 'on' : ''}" onclick="tab('${k}')">${t}</button>`).join('');
+  ({jobs: viewJobs, drafts: viewDrafts, mine: viewMine, cards: viewCards, settings: viewSettings, ask: viewAsk, log: viewLog})[S.tab]();
+}
+function tab(k) { S.tab = k; localStorage.setItem('jh-tab', k); render(); }
+
+function jobCard(j) {
+  const color = j.score >= 75 ? 'green' : j.score >= 50 ? 'blue' : '';
+  const open = ['new','notified','interested','drafted'].includes(j.status);
+  const draft = S.status.drafts.find(d => d.job_id === j.id);
+  return `<div class="card job">
+    <div class="row"><span class="pill ${color} score">${j.score}% match</span><span class="pill">${STATUS_AR[j.status] || j.status}</span><span class="muted" style="margin-inline-start:auto">${esc(j.id)}</span></div>
+    <h3 dir="auto">${esc(j.title)}</h3>
+    <div dir="auto">${esc(j.company || '')}${j.location ? ' · ' + esc(j.location) : ''}</div>
+    <div class="muted">${esc((j.sources || [j.source]).join(', '))}${j.posted_at ? ' · posted ' + ago(j.posted_at) : ''}${j.apply_email ? ' · ✉ apply by email' : ''}</div>
+    ${j.reasons && j.reasons.length ? `<div class="why">${esc(j.reasons.slice(0, 4).join(' · '))}</div>` : ''}
+    <div class="row">
+      ${j.url ? `<a class="btn" href="${esc(j.url)}" target="_blank" rel="noopener">Open posting ↗</a>` : ''}
+      ${draft ? `<button class="primary" onclick="openDraft('${draft.id}')">Review & send</button>`
+              : open ? `<button class="primary" onclick="job('${j.id}','apply')">Prepare application</button>` : ''}
+      ${open ? `<button onclick="job('${j.id}','applied')">I applied ✔</button>` : ''}
+      ${S.status.master_cv ? `<a class="btn" href="/api/jobhunter/jobs/${esc(j.id)}/cv" download>CV for this job ⬇</a>` : ''}
+      ${['applied','interview','assessment'].includes(j.status) ? `<button onclick="job('${j.id}','followup')">Follow up</button>` : ''}
+      ${j.last_inbound_from ? `<button onclick="reply('${j.id}')">Reply to them</button>` : ''}
+      <button onclick="details('${j.id}')">Details</button>
+      ${!['skipped','closed','rejected'].includes(j.status) ? `<button class="danger" onclick="job('${j.id}','skip')">Not for me</button>` : ''}
+    </div></div>`;
+}
+function viewJobs() {
+  const list = S.jobs.filter(j => ['new','notified','interested'].includes(j.status) && j.score >= S.profile.min_score);
+  $('#view').innerHTML = `<div class="card"><div class="row"><input id="q" placeholder="Search every site now — e.g. AI engineer" style="flex:1;min-width:200px">
+      <select id="qloc" style="width:auto"><option value="">Your cities</option><option>Riyadh</option><option>Jeddah</option><option>Eastern Province</option></select>
+      <button class="primary" onclick="search()">Search</button></div></div>
+    <div id="results"></div>
+    <h2>Best jobs for you (${list.length})</h2>
+    <div class="grid">${list.map(jobCard).join('') || '<div class="card muted">No jobs yet. Press “🔎 Search now” above.</div>'}</div>`;
+}
+function viewMine() {
+  const list = S.jobs.filter(j => ['drafted','applied','interview','assessment','offer','rejected'].includes(j.status));
+  const due = S.status.followups_due;
+  $('#view').innerHTML = (due.length ? `<div class="card alert">⏰ ${due.length} application(s) with no reply for ${S.profile.follow_up_days} days — press “Follow up”.</div>` : '')
+    + `<div class="grid">${list.map(jobCard).join('') || '<div class="card muted">No applications yet.</div>'}</div>`;
+}
+function viewDrafts() {
+  const d = S.status.drafts;
+  $('#view').innerHTML = `<p class="muted" style="margin-bottom:10px">Emails ready for companies. <b>Nothing is sent until you press “Send”.</b></p>` +
+    (d.map(x => {
+      const j = S.jobs.find(j => j.id === x.job_id) || {};
+      return `<div class="card"><div class="row"><span class="pill orange">${x.kind === 'application' ? 'Application' : x.kind === 'followup' ? 'Follow-up' : 'Reply'}</span>
+        <b dir="auto">${esc(j.title || x.job_id)}</b><span class="muted" dir="auto">${esc(j.company || '')}</span></div>
+        <p class="muted">To: ${esc(x.to_addr)} · ${x.attach_cv ? 'tailored CV attached' : 'no attachment'}</p>
+        <div class="row"><button class="primary" onclick="openDraft('${x.id}')">Review & send</button><button class="danger" onclick="job('${x.job_id}','cancel')">Delete draft</button></div></div>`;
+    }).join('') || '<div class="card muted">Nothing is waiting for you.</div>');
+}
+async function viewCards() {
+  const contacts = await api('/contacts');
+  const sites = S.profile.company_sites || [], st = S.status.company_status || {};
+  $('#view').innerHTML = `<div class="grid">
+    <div class="card"><h2>📇 Business card</h2><p class="muted">Upload a photo. It reads the card, saves the contact, and if there is an email it prepares an application with a tailored CV (sent only after your OK).</p>
+      <label class="btn primary" style="margin-top:10px">📷 Upload card photo<input type="file" id="cardFile" accept="image/*" multiple hidden onchange="uploadCards(this)"></label>
+      <label>Or type it:</label><div class="row"><input id="cardText" placeholder="Ahmed Ali, HR Manager, Acme, ahmed@acme.sa, 0551234567" class="ltr" style="flex:1"><button onclick="cardText()">Save</button></div>
+      <div id="cardOut"></div></div>
+    <div class="card"><h2>🏢 Company websites</h2><p class="muted">Add any company link — its careers page is checked on every search.</p>
+      <div class="row"><input id="site" class="ltr" placeholder="https://company.com/careers" style="flex:1"><button class="primary" onclick="addSite()">Watch</button></div>
+      ${sites.map(u => `<div class="doc-row"><div style="flex:1">${esc(u)}<div class="muted">${esc(st[u] || 'checked on the next search')}</div></div><button class="danger" onclick="delSite('${esc(u)}')">✕</button></div>`).join('')}</div></div>
+    <h2 style="margin-top:8px">Contacts (${contacts.length})</h2>
+    <div class="grid">${contacts.map(c => `<div class="card"><b dir="auto">${esc(c.name || c.email)}</b><div class="muted" dir="auto">${esc([c.title, c.company].filter(Boolean).join(' · '))}</div>
+      <div class="muted">${esc([c.email, c.phone].filter(Boolean).join(' · '))}</div></div>`).join('') || '<div class="card muted">No cards yet.</div>'}</div>`;
+}
+function viewSettings() {
+  const p = S.profile, s = S.status;
+  const f = (k, t, v, ph = '') => `<label>${t}</label><input id="set_${k}" class="ltr" value="${esc(v)}" placeholder="${esc(ph)}">`;
+  $('#view').innerHTML = `<div class="card"><h2>What you want</h2>
+    ${f('roles', 'Job titles (comma separated) — the first 4 are searched every cycle', (p.roles || []).join(', '))}
+    ${f('skills', 'Your skills', (p.skills || []).join(', '))}
+    ${f('locations', 'Cities', (p.locations || []).join(', '), 'Riyadh, Jeddah, Eastern Province')}
+    <label>Level</label><select id="set_level">${[['entry','Entry / fresh graduate'],['mid','Mid'],['senior','Senior'],['any','Any']].map(([v,t]) => `<option value="${v}" ${p.level === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
+    <label>Minimum match % to email you</label><input id="set_min_score" type="number" min="0" max="100" value="${p.min_score}" style="max-width:120px">
+    <label class="check"><input type="checkbox" id="set_remote_ok" ${p.remote_ok ? 'checked' : ''}> Include remote jobs</label>
+    <label class="check"><input type="checkbox" id="set_strict_location" ${p.strict_location ? 'checked' : ''}> Hide jobs outside my cities</label>
+    <label class="check"><input type="checkbox" id="set_organize_inbox" ${p.organize_inbox ? 'checked' : ''}> Keep my inbox tidy (labels + move ads/newsletters out)</label>
+    <label>Search every (minutes)</label><input id="set_search_every_minutes" type="number" value="${p.search_every_minutes}" style="max-width:120px">
+    <div class="row" style="margin-top:12px"><button class="good" onclick="saveSettings()">Save settings</button></div></div>
+    <div class="card"><h2>✉ Email</h2><p class="muted">Account: ${esc(s.email.address || 'mohammadbakerwork@gmail.com')} — ${s.email.configured ? '<span class="pill green">connected</span>' : '<span class="pill red">not connected</span>'}</p>
+    <label>Gmail App Password (16 letters)</label><div class="row"><input class="ltr" id="appPw2" placeholder="xxxx xxxx xxxx xxxx" style="max-width:260px"><button class="good" onclick="connectEmail('appPw2')">Connect</button>
+    ${s.email.configured ? '<button onclick="testMail()">Send me a test email</button>' : ''}</div></div>`;
+}
+function viewAsk() {
+  $('#view').innerHTML = `<div class="card"><h2>Ask the agent or give a command</h2>
+    <p class="muted">Examples: <code>status</code> · <code>jobs</code> · <code>search AI engineer in Riyadh</code> · <code>apply 1</code> · <code>help</code></p>
+    <div class="row" style="margin-top:8px"><input id="askText" placeholder="Type here…" style="flex:1" onkeydown="if(event.key==='Enter')ask()"><button class="primary" onclick="ask()">Send</button></div>
+    <div id="askOut" style="margin-top:12px"></div></div>`;
+}
+async function viewLog() {
+  const a = await api('/activity');
+  const kind = {search:'Search', notice:'Notice', error:'Error', agent:'Agent', reply:'Company reply', sent:'Sent', inbox:'Email', contact:'Card', profile:'Settings', security:'Security', cv:'CV'};
+  $('#view').innerHTML = `<div class="card">${a.events.map(e => `<div class="doc-row"><span class="pill ${e.kind === 'error' ? 'red' : ''}">${kind[e.kind] || e.kind}</span>
+    <div style="flex:1"><div dir="auto">${esc(e.message)}</div><div class="muted">${ago(e.created_at)}</div></div></div>`).join('') || '<p class="muted">Nothing yet.</p>'}</div>`;
+}
+
+async function act(what) {
+  try {
+    if (what === 'run') { S.busy.run = true; render(); await api('/run', {}); toast('Searching every site… (1–2 minutes)'); setTimeout(async () => { S.busy.run = false; await load(); }, 60000); return; }
+    if (what === 'inbox') { const r = await api('/inbox', {}); toast(r.error ? 'Email: ' + r.error : `Read ${r.checked || 0} new emails`); }
+    if (what === 'organize') { toast('Tidying your inbox…'); const r = await api('/organize', {days: 30}); toast(r.error || `Moved ${r.moved} emails into Job Hunter labels`); }
+    if (what === 'start') { await api('/start', {}); toast('Started ✅'); }
+    if (what === 'stop') { await api('/stop', {}); toast('Stopped'); }
+    await load();
+  } catch (e) { S.busy.run = false; toast(e.message); render(); }
+}
+async function job(id, action, body = {}) {
+  try {
+    const r = await api(`/jobs/${id}/${action}`, body);
+    await load();
+    const d = S.status.drafts.find(x => x.job_id === id);
+    if (['apply','followup','reply'].includes(action)) {
+      if (d) return openDraft(d.id);
+      return show('Ready', `<p class="muted">This job is applied for on their website. I opened the posting — here is a letter you can copy:</p><pre>${esc(r.message)}</pre>`);
+    }
+    toast({skip:'Skipped', applied:'Marked as applied — I will watch for their reply', cancel:'Draft deleted', send:'Sent ✅'}[action] || 'Done');
+  } catch (e) { toast(e.message); }
+}
+function reply(id) { const t = prompt('What should the reply say? (I add the greeting and signature)'); if (t) job(id, 'reply', {text: t}); }
+function openDraft(id) {
+  const d = S.status.drafts.find(x => x.id === id); if (!d) return toast('Draft not found');
+  show('Review before sending', `<label>To</label><input id="d_to" class="ltr" value="${esc(d.to_addr)}"><label>Subject</label><input id="d_sub" class="ltr" value="${esc(d.subject)}">
+    <label>Message</label><textarea id="d_body" rows="12">${esc(d.body)}</textarea><p class="muted">${d.attach_cv ? 'A CV tailored to this job will be attached.' : ''}</p>
+    <div class="row"><button class="good" onclick="sendDraft('${d.id}','${d.job_id}')">Send now ✉</button><button onclick="saveDraft('${d.id}')">Save changes</button></div>`);
+}
+async function saveDraft(id) { await api(`/drafts/${id}`, {to_addr: $('#d_to').value, subject: $('#d_sub').value, body: $('#d_body').value}); toast('Saved'); }
+async function sendDraft(id, jobId) {
+  if (!confirm('Send this email now?')) return;
+  try { await saveDraft(id); const r = await api(`/jobs/${jobId}/send`, {}); dlg.close(); toast(r.message.startsWith('✅') ? 'Sent ✅' : r.message); await load(); }
+  catch (e) { toast(e.message); }
+}
+async function details(id) {
+  const j = await api(`/jobs/${id}`);
+  show(esc(j.title), `<p>${esc(j.company)} · ${esc(j.location)}</p>${j.url ? `<p><a href="${esc(j.url)}" target="_blank">${esc(j.url)}</a></p>` : ''}
+    <div class="why">${esc((j.reasons || []).join(' · '))}</div><pre>${esc(j.description || 'No description — open the posting.')}</pre>`);
+}
+async function search() {
+  const q = $('#q').value.trim(); if (!q) return;
+  $('#results').innerHTML = '<div class="card muted">Searching every site… please wait</div>';
+  try { const r = await api('/search', {query: q, location: $('#qloc').value});
+    $('#results').innerHTML = `<h2>Results for “${esc(q)}” (${r.results.length})</h2><div class="grid">${r.results.map(jobCard).join('') || '<div class="card muted">Nothing found.</div>'}</div>`
+      + (Object.keys(r.errors).length ? `<p class="muted">Sites that did not answer: ${esc(Object.keys(r.errors).join(', '))}</p>` : '');
+  } catch (e) { $('#results').innerHTML = `<div class="card alert">${esc(e.message)}</div>`; }
+}
+async function connectEmail(field = 'appPw') {
+  const pw = $('#' + field).value.trim(); if (!pw) return toast('Paste the App Password first');
+  try { await api('/email', {address: 'mohammadbakerwork@gmail.com', password: pw, owner_emails: 'mohammadbakerwork@gmail.com'}); toast('✅ Email connected'); await load(); }
+  catch (e) { toast(e.message.includes('AUTHENTICATIONFAILED') || e.message.includes('login failed') ? 'Google rejected it — make sure it is an App Password from the same account' : e.message); }
+}
+async function testMail() { try { await api('/email/test', {}); toast('Test email sent ✅'); } catch (e) { toast(e.message); } }
+async function saveSettings() {
+  const v = k => $('#set_' + k);
+  try { await api('/profile', {roles: v('roles').value, skills: v('skills').value, locations: v('locations').value, level: v('level').value,
+    min_score: +v('min_score').value, remote_ok: v('remote_ok').checked, strict_location: v('strict_location').checked,
+    search_every_minutes: +v('search_every_minutes').value, organize_inbox: v('organize_inbox').checked}); toast('Saved ✅'); await load(); } catch (e) { toast(e.message); }
+}
+async function ask() {
+  const t = $('#askText').value.trim(); if (!t) return;
+  $('#askOut').innerHTML = '<p class="muted">…</p>';
+  try { const r = await api('/ask', {text: t}); $('#askOut').innerHTML = `<pre>${esc(r.reply)}</pre>`; await load(); tab('ask'); $('#askOut').innerHTML = `<pre>${esc(r.reply)}</pre>`; }
+  catch (e) { $('#askOut').innerHTML = `<div class="card alert">${esc(e.message)}</div>`; }
+}
+async function uploadCards(input) {
+  for (const file of input.files) {
+    toast('Reading the card… (can take a minute)');
+    try { const r = await api('/cards', file, {'X-Filename': file.name, 'Content-Type': 'application/octet-stream'}); $('#cardOut').innerHTML = `<pre>${esc(r.message)}</pre>` + $('#cardOut').innerHTML; }
+    catch (e) { toast(e.message); }
+  }
+  await load();
+}
+async function cardText() { try { const r = await api('/contacts', {text: $('#cardText').value}); await load(); $('#cardOut').innerHTML = `<pre>${esc(r.message)}</pre>`; } catch (e) { toast(e.message); } }
+async function addSite() { let u = $('#site').value.trim(); if (!u) return; if (!/^https?:\/\//.test(u)) u = 'https://' + u;
+  await api('/profile', {company_sites: [...(S.profile.company_sites || []), u]}); toast('Now watching ✅'); await load(); }
+async function delSite(u) { await api('/profile', {company_sites: S.profile.company_sites.filter(x => x !== u)}); await load(); }
+async function doctor() {
+  show('Health check', '<p class="muted">Checking email and every job site… (about a minute)</p>');
+  try { const r = await api('/doctor', {});
+    const icon = {ok:'✅', fail:'❌', warn:'⚠️', skip:'➖'};
+    $('#dlgBody').innerHTML = '<h2>Health check</h2>' + r.checks.map(c => `<div class="doc-row"><span>${icon[c.status]}</span><div style="flex:1"><b>${esc(c.name)}</b><div class="muted">${esc(c.detail)}</div>${c.fix ? `<div class="muted">→ ${esc(c.fix)}</div>` : ''}</div></div>`).join('');
+  } catch (e) { $('#dlgBody').innerHTML = `<h2>Health check</h2><div class="card alert">${esc(e.message)}</div>`; }
+}
+load().catch(e => { $('#state').textContent = 'The agent is not running: ' + e.message; });
+setInterval(() => { if (!document.querySelector('dialog[open]') && !['settings','ask','cards'].includes(S.tab)) load().catch(() => {}); }, 30000);
+</script>
+</body>
+</html>

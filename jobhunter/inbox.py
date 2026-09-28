@@ -120,3 +120,33 @@ def match_company(msg: IncomingMail, jobs: List[Dict[str, Any]], header_only: bo
         if points > best_points:
             best, best_points = job, points
     return best if best_points >= (3 if header_only else 2) else None
+
+
+# ── Inbox tidying (Gmail labels) ──────────────────────────────────────────────
+LABEL_ROOT = "Job Hunter"
+_BULK_SENDER = re.compile(r"(no-?reply|noreply|newsletter|news|marketing|promo|notifications?|updates|info|hello|mailer)@", re.I)
+
+
+def is_bulk(msg: IncomingMail) -> bool:
+    return (msg.list_unsubscribe or msg.precedence in ("bulk", "list", "junk")
+            or msg.auto_submitted.startswith("auto-generated") or bool(_BULK_SENDER.search(msg.from_addr)))
+
+
+def categorize(kind: str, msg: IncomingMail, alert_items: int = 0) -> Optional[Tuple[str, bool]]:
+    """(Gmail label, archive?) for a processed message — None leaves it untouched (e.g. personal mail)."""
+    if kind == "reply":
+        label = classify_reply(msg.subject, msg.text)
+        if label == "received":
+            return f"{LABEL_ROOT}/Applications", True
+        return f"{LABEL_ROOT}/Employer replies", False
+    if kind == "recruiter":
+        return f"{LABEL_ROOT}/Recruiters", False
+    if kind == "alert":
+        return (f"{LABEL_ROOT}/Job alerts", True) if alert_items else (f"{LABEL_ROOT}/Low priority", True)
+    if kind == "command":
+        return f"{LABEL_ROOT}/Commands", True
+    if kind == "own":
+        return f"{LABEL_ROOT}/From agent", False
+    if kind == "ignored" and is_bulk(msg):
+        return f"{LABEL_ROOT}/Low priority", True
+    return None

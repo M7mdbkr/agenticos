@@ -304,6 +304,8 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(size) or b"{}")
 
     def static(self, path):
+        if path == "/dashboard":
+            path = "/static/dashboard.html"
         allowed = path in {"/", "/index.html", "/README.md"} or path.startswith(("/static/", "/docs/"))
         if not allowed:
             return self.send_error(404)
@@ -573,6 +575,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"started": True}, 202)
             if path == "/inbox":
                 return self.send_json(hunter.check_inbox())
+            if path == "/organize":
+                return self.send_json(hunter.organize_existing(int(data.get("days", 30))))
             if path == "/doctor":
                 from jobhunter.doctor import run as doctor_run
                 return self.send_json({"checks": doctor_run(hunter, live=bool(data.get("live", True)))})

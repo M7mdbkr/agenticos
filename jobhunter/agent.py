@@ -25,7 +25,7 @@ from .companies import fetch_company_sites
 _REGISTERED_SOURCES = (fetch_company_sites,)  # importing companies registers the company-sites source
 from .commands import Commands, command_lines
 from .config import data_dir as default_data_dir, mail_settings
-from .inbox import LABELS, classify_reply, is_job_alert, looks_recruiting, match_company, parse_alert
+from .inbox import LABELS, categorize, classify_reply, is_job_alert, looks_recruiting, match_company, parse_alert
 from .mailbox import IncomingMail, MailError, Mailbox
 from .profile import is_ready, load_profile, update_profile
 from .scoring import score_job
@@ -477,14 +477,19 @@ class JobHunter:
                 return {"error": str(exc)}
             kinds: Dict[str, int] = {}
             alert_jobs: List[Dict[str, Any]] = []
+            actions = []
             for msg in messages:
                 try:
                     kind = self.process_message(msg, alert_jobs)
+                    target = categorize(kind, msg, alert_items=len(parse_alert(msg)) if kind == "alert" else 0)
+                    if target and msg.uid:
+                        actions.append((msg.uid, *target))
                 except Exception as exc:
                     kind = "error"
                     self.store.event("error", f"Could not process an email: {exc}", trace=traceback.format_exc()[-1500:])
                 kinds[kind] = kinds.get(kind, 0) + 1
             self.store.set_state("imap_state", imap_state)
+            self._organize(actions)
             if alert_jobs:
                 self.send_digest(sorted(alert_jobs, key=lambda j: -j["score"]),
                                  intro=f"Your job-alert emails contained {len(alert_jobs)} new matching job"
@@ -494,6 +499,48 @@ class JobHunter:
             return {"checked": len(messages), "kinds": kinds}
         finally:
             self._inbox_lock.release()
+
+    def _organize(self, actions) -> int:
+        if not actions or not self.profile().get("organize_inbox", True) or not getattr(self.mailbox, "is_gmail", False):
+            return 0
+        try:
+            moved = self.mailbox.organize(actions)
+        except MailError as exc:
+            self.store.event("error", f"Could not tidy the inbox: {exc}")
+            return 0
+        if moved:
+            self.store.event("inbox", f"Tidied {moved} emails into Job Hunter labels")
+        return moved
+
+    def organize_existing(self, days: int = 30) -> Dict[str, Any]:
+        """One-off tidy of mail already in the Inbox. Only labels/archives — never runs commands or replies."""
+        mailbox = self.mailbox
+        if not mailbox.configured:
+            return {"error": "Email is not connected"}
+        if not getattr(mailbox, "is_gmail", False):
+            return {"error": "Tidying uses Gmail labels, so it only works with Gmail"}
+        tracked = self.store.list_jobs(statuses=ACTIVE_STATUSES + ("drafted",), limit=300, order="updated")
+        owners = self.owner_emails()
+        actions, counts = [], {}
+        for msg in mailbox.fetch_recent(days):
+            if msg.agent_header:
+                kind = "own"
+            elif msg.from_addr in owners:
+                kind = "skip"
+            elif self.store.job_for_message_ids(msg.thread_ids) or (not is_job_alert(msg) and match_company(msg, tracked)):
+                kind = "reply"
+            elif is_job_alert(msg):
+                kind = "alert"
+            elif looks_recruiting(msg):
+                kind = "recruiter"
+            else:
+                kind = "ignored"
+            target = categorize(kind, msg, alert_items=len(parse_alert(msg)) if kind == "alert" else 0)
+            if target:
+                actions.append((msg.uid, *target))
+                counts[target[0]] = counts.get(target[0], 0) + 1
+        moved = self._organize(actions)
+        return {"checked_days": days, "moved": moved, "labels": counts}
 
     def _sender_verified(self, msg: IncomingMail) -> bool:
         results = msg.auth_results.lower()

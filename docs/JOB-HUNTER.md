@@ -96,6 +96,20 @@ Only one scheduler runs at a time (a lock file prevents double emails). The web 
 Default rhythm (change in Settings): search every 3 h, inbox every 10 min, daily report at 09:00,
 follow-up suggestion after 7 days.
 
+## Dashboard
+
+`python3 -m jobhunter dashboard` opens **http://127.0.0.1:8765/dashboard** — status, jobs with Prepare /
+Send / Skip / "I applied" buttons, drafts waiting for your OK, applications, business cards, company sites,
+settings, email connection and a health check. The background service runs the dashboard too, so the link
+works whenever the laptop is on.
+
+## Tidy inbox (Gmail)
+
+Every inbox check files mail into Gmail labels: **Job Hunter/Employer replies** and **/Recruiters** stay in the
+Inbox; **/Job alerts**, **/Applications** (confirmations), **/Commands** and **/Low priority** (ads, newsletters,
+LinkedIn invitations) are moved out of the Inbox — nothing is deleted. Personal mail is left alone.
+Tidy what is already there: `python3 -m jobhunter organize --days 30` (or 🧹 Tidy inbox). Turn it off in Settings.
+
 ## 3. Talk to it
 
 Reply to any Job Hunter email (one command per line), use the **Ask** tab, `python3 -m jobhunter ask "…"`,

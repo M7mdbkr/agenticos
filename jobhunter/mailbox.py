@@ -47,6 +47,7 @@ class IncomingMail:
     auto_submitted: str = ""
     list_unsubscribe: bool = False
     images: List[Tuple[str, bytes]] = field(default_factory=list)  # (filename, bytes) of attached photos
+    precedence: str = ""
 
     @property
     def thread_ids(self) -> List[str]:
@@ -107,6 +108,7 @@ def parse_message(raw: bytes, uid: int = 0) -> IncomingMail:
         auto_submitted=str(msg.get("Auto-Submitted", "") or "").lower(),
         list_unsubscribe=bool(msg.get("List-Unsubscribe")),
         images=images,
+        precedence=str(msg.get("Precedence", "") or "").lower(),
     )
 
 
@@ -173,6 +175,56 @@ class Mailbox:
                 conn.logout()
             except Exception:
                 pass
+
+    @property
+    def is_gmail(self) -> bool:
+        return "gmail" in (self.settings.imap_host or "")
+
+    def fetch_recent(self, days: int = 30, limit: int = 500) -> List[IncomingMail]:
+        """Read-only: messages of the last N days (used to tidy up an existing inbox once)."""
+        conn = self._imap()
+        try:
+            conn.select("INBOX", readonly=True)
+            since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%d-%b-%Y")
+            typ, data = conn.uid("SEARCH", None, "SINCE", since)
+            uids = sorted(int(x) for x in (data[0] or b"").split())[-limit:] if typ == "OK" else []
+            out = []
+            for uid in uids:
+                typ, parts = conn.uid("FETCH", str(uid), "(BODY.PEEK[])")
+                raw = next((p[1] for p in parts or [] if isinstance(p, tuple) and len(p) > 1), None)
+                if typ == "OK" and raw:
+                    out.append(parse_message(raw, uid))
+            return out
+        finally:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+
+    def organize(self, actions: Sequence[Tuple[int, str, bool]]) -> int:
+        """Gmail only: add a label to each message and, when archive=True, take it out of the Inbox.
+
+        Nothing is deleted — archived mail stays under its label and in "All Mail".
+        """
+        if not actions or not self.is_gmail:
+            return 0
+        conn = self._imap()
+        done = 0
+        try:
+            conn.select("INBOX")
+            for label in sorted({label for _, label, _ in actions}):
+                conn.create(f'"{label}"')  # fails harmlessly when the label exists
+            for uid, label, archive in actions:
+                typ, _ = conn.uid("STORE", str(uid), "+X-GM-LABELS", f'("{label}")')
+                if typ == "OK" and archive:
+                    conn.uid("STORE", str(uid), "-X-GM-LABELS", "(\\Inbox)")
+                done += typ == "OK"
+        finally:
+            try:
+                conn.logout()
+            except Exception:
+                pass
+        return done
 
     # ── SMTP ────────────────────────────────────────────────────────────────
     def send(self, to: Sequence[str] | str, subject: str, text: str, html: Optional[str] = None,

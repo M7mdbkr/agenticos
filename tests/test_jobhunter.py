@@ -80,15 +80,26 @@ def raw_mail(sender, subject, body, message_id, in_reply_to=None, auth=None, htm
 
 
 class FakeMailbox:
+    is_gmail = True
+
     def __init__(self, address="me@gmail.com"):
         self.address = address
         self.configured = True
+        self.organized = []
+        self.recent = []
         self.settings = MailSettings(address=address, password="x", imap_host="imap", smtp_host="smtp")
         self.inbox = []
         self.sent = []
 
     def test(self):
         return {"imap": True, "smtp": True}
+
+    def organize(self, actions):
+        self.organized.extend(actions)
+        return len(actions)
+
+    def fetch_recent(self, days=30, limit=500):
+        return list(self.recent)
 
     def fetch_new(self, state=None, first_run_days=2, limit=60):
         messages, self.inbox = self.inbox, []
@@ -497,6 +508,47 @@ class DoctorTests(AgentCase):
         checks = {c["name"]: c for c in run(self.hunter, live=True)}
         self.assertIn("4 postings", checks["Source · Fake"]["detail"])
         self.assertEqual("warn", checks["Source · Broken"]["status"])
+
+
+class InboxTidyTests(AgentCase):
+    def test_new_mail_is_labelled_and_ads_leave_the_inbox(self):
+        news = raw_mail("deals@shop.example", "Big sale", "50% off", "<n1@x>", headers={"List-Unsubscribe": "<mailto:x>"})
+        news.uid = 11
+        personal = raw_mail("friend@gmail.com", "Dinner?", "See you at 8", "<p1@x>")
+        personal.uid = 12
+        alert = raw_mail("jobalerts-noreply@linkedin.com", "New jobs", "Graduate Software Engineer",
+                         "<a1@x>", html='<a href="https://www.linkedin.com/jobs/view/4011111111">Graduate Software Engineer</a>')
+        alert.uid = 13
+        invite = raw_mail("invitations@linkedin.com", "You have an invitation", "Sara is waiting", "<i1@x>",
+                          headers={"List-Unsubscribe": "<mailto:x>"})
+        invite.uid = 14
+        self.deliver(news, personal, alert, invite)
+        self.assertEqual([(11, "Job Hunter/Low priority", True), (13, "Job Hunter/Job alerts", True),
+                          (14, "Job Hunter/Low priority", True)], self.mailbox.organized)
+
+    def test_employer_replies_stay_in_the_inbox_and_tidy_can_be_switched_off(self):
+        self.hunter.search()
+        job_id = self.hunter.store.get_state("last_list")[1]
+        self.hunter.handle_text(f"applied {job_id}")
+        reply = raw_mail("hr@gulfnet.example", "Interview — Gulf Net", "We would like to invite you to an interview.", "<r1@x>")
+        reply.uid = 20
+        self.deliver(reply)
+        self.assertIn((20, "Job Hunter/Employer replies", False), self.mailbox.organized)
+        self.hunter.update_profile({"organize_inbox": False})
+        news = raw_mail("news@shop.example", "Sale", "x", "<n2@x>", headers={"List-Unsubscribe": "<mailto:x>"})
+        news.uid = 21
+        self.deliver(news)
+        self.assertNotIn(21, [a[0] for a in self.mailbox.organized])
+
+    def test_tidy_existing_inbox_never_runs_commands(self):
+        old_cmd = raw_mail("me@gmail.com", "Jobs", "send ABCDE", "<c9@x>")
+        old_cmd.uid = 30
+        old_news = raw_mail("promo@store.example", "Offer", "x", "<o9@x>", headers={"List-Unsubscribe": "<mailto:x>"})
+        old_news.uid = 31
+        self.mailbox.recent = [old_cmd, old_news]
+        result = self.hunter.organize_existing(30)
+        self.assertEqual({"Job Hunter/Low priority": 1}, result["labels"])
+        self.assertEqual([], self.mailbox.sent)
 
 
 class HelperTests(unittest.TestCase):

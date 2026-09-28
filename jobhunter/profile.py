@@ -53,6 +53,7 @@ DEFAULT_PROFILE: Dict[str, Any] = {
     "paused": False,
     "autostart": False,
     "open_browser_on_apply": True,
+    "organize_inbox": True,  # Gmail: label job mail and move ads/newsletters out of the Inbox
     # Optional writing brain for cover letters and free-form questions
     "brain": "none",
     "brain_model": "",
@@ -69,7 +70,7 @@ _INT_LIMITS = {
     "follow_up_days": (1, 60),
 }
 _BOOL_FIELDS = ("remote_ok", "strict_location", "notify_email", "notify_telegram", "notify_desktop",
-                "notify_when_empty", "paused", "autostart", "open_browser_on_apply")
+                "notify_when_empty", "paused", "autostart", "open_browser_on_apply", "organize_inbox")
 _TEXT_LIMITS = {"name": 120, "phone": 60, "headline": 200, "summary": 2000, "cv_path": 500,
                 "telegram_chat_id": 40, "brain_model": 80, "vision_model": 80}
 
