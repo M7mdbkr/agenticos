@@ -139,6 +139,12 @@ Create a `.env` file in the Personal-OS folder:
 TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ
 NOTION_API_KEY=secret_abc123...
 N8N_WEBHOOK_URL=https://your-n8n.com/webhook/
+
+# Job Hunter (see docs/JOB-HUNTER.md) — easiest: python3 -m jobhunter setup
+JOBHUNTER_EMAIL=you@gmail.com
+JOBHUNTER_EMAIL_PASSWORD=abcdefghijklmnop   # Gmail App Password, not your normal password
+RAPIDAPI_KEY=...                            # optional: JSearch / Google for Jobs (Indeed, Bayt, Glassdoor…)
+SERPAPI_KEY=...                             # optional: Google for Jobs via SerpAPI
 ```
 
 ---

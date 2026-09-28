@@ -6,6 +6,7 @@ import cgi
 import json
 import mimetypes
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -139,6 +140,8 @@ def telegram_polling_thread(bot_token: str, update_queue: list) -> None:
             chat = msg.get("chat", {})
             text = msg.get("text") or ""
             voice = msg.get("voice")
+            if text and _jobhunter_telegram(str(chat.get("id", "")), text):
+                continue
             # Only handle text or voice messages
             if text or voice:
                 update_queue.append({
@@ -161,6 +164,55 @@ def start_telegram_polling() -> bool:
     TELEGRAM_POLLING_STOP.clear()
     t = threading.Thread(target=telegram_polling_thread, args=(TELEGRAM_BOT_TOKEN, TELEGRAM_PENDING), daemon=True, name="telegram-polling")
     t.start()
+    return True
+
+
+# ── Job Hunter agent (jobhunter/) ─────────────────────────────────────────────
+
+JOBHUNTER = None
+JOBHUNTER_LOCK = threading.Lock()
+CV_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt", ".rtf", ".odt"}
+
+
+def _job_source_feeds() -> list:
+    """RSS feeds from the Job sources page feed the job hunter too."""
+    with STORE_LOCK:
+        sources = STORE.list_resources("job_sources")
+    return [s.get("url", "") for s in sources if s.get("enabled") and "rss" in str(s.get("kind", "")).lower()
+            and str(s.get("url", "")).startswith(("http://", "https://"))]
+
+
+def get_hunter():
+    global JOBHUNTER
+    with JOBHUNTER_LOCK:
+        if JOBHUNTER is None:
+            from jobhunter import JobHunter
+            JOBHUNTER = JobHunter(data_dir=DATA / "jobhunter", extra_feeds=_job_source_feeds)
+        return JOBHUNTER
+
+
+def _jobhunter_telegram(chat_id: str, text: str) -> bool:
+    """Route '/jobs …' Telegram messages from the chat set in Job Hunter settings. True when handled."""
+    if not re.match(r"^/?(jobs?|jh)\b", text.strip(), re.I):
+        return False
+    try:
+        hunter = get_hunter()
+        allowed = hunter.profile()["telegram_chat_id"]
+    except Exception:
+        return False
+    if not allowed or allowed != chat_id:
+        return False
+    body = re.sub(r"^/?(jobs?|jh)(@\w+)?\b[:\s]*", "", text.strip(), flags=re.I).strip() or "jobs"
+
+    def answer():
+        from jobhunter.notify import telegram_send
+        try:
+            reply = hunter.handle_text(body, channel="telegram")
+        except Exception as exc:
+            reply = f"Job Hunter error: {exc}"
+        telegram_send(TELEGRAM_BOT_TOKEN, chat_id, reply)
+
+    threading.Thread(target=answer, daemon=True, name="jobhunter-telegram").start()
     return True
 
 
@@ -220,8 +272,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data))); self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers(); self.wfile.write(data)
 
-    @store_request
     def do_GET(self):
+        if urlparse(self.path).path.startswith("/api/jobhunter/"):
+            return self.jobhunter_request("GET")
+        return self._get_core()
+
+    @store_request
+    def _get_core(self):
         global TELEGRAM_BOT_TOKEN
         parsed = urlparse(self.path); path = parsed.path
         try:
@@ -288,6 +345,7 @@ class Handler(BaseHTTPRequestHandler):
                     new_lines.append(f'TELEGRAM_BOT_TOKEN={token}')
                 env_path.write_text("\n".join(new_lines) + "\n")
                 TELEGRAM_BOT_TOKEN = token
+                os.environ["TELEGRAM_BOT_TOKEN"] = token  # visible to the job hunter too
                 # Start polling
                 start_telegram_polling()
                 return self.send_json({"ok": True, "bot_username": result.get("result", {}).get("username", "unknown")})
@@ -397,6 +455,155 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             self.send_json({"error": "Internal error", "detail": str(exc)}, 500)
 
+    def jobhunter_request(self, method):
+        """Job Hunter API. Runs outside STORE_LOCK: searches and brain calls can take a while."""
+        parsed = urlparse(self.path)
+        path = parsed.path[len("/api/jobhunter"):]
+        query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+        try:
+            hunter = get_hunter()
+            if method == "GET":
+                if path == "/status":
+                    return self.send_json(hunter.status())
+                if path == "/profile":
+                    return self.send_json(hunter.profile())
+                if path == "/jobs":
+                    statuses = [s for s in query.get("status", "").split(",") if s]
+                    return self.send_json(hunter.store.list_jobs(
+                        statuses=statuses or None, min_score=int(query.get("min_score") or 0), query=query.get("q", "")[:100],
+                        limit=int(query.get("limit") or 200), order=query.get("order", "score")))
+                if path.startswith("/jobs/"):
+                    return self.send_json(hunter.store.get_job(path.split("/")[2]))
+                if path == "/drafts":
+                    return self.send_json(hunter.store.list_drafts())
+                if path == "/activity":
+                    return self.send_json({"events": hunter.store.events(80), "mail": hunter.store.mail_log(80)})
+                return self.send_json({"error": "Not found"}, 404)
+            if path == "/cv":
+                return self.jobhunter_cv(hunter)
+            data = self.body_json()
+            if not isinstance(data, dict):
+                raise ValueError("JSON object expected")
+            if path == "/profile":
+                return self.send_json(hunter.update_profile(data))
+            if path == "/ask":
+                text = str(data.get("text", "")).strip()
+                if not text or len(text) > 4000:
+                    return self.send_json({"error": "Enter a command or question (max 4,000 characters)"}, 400)
+                return self.send_json({"reply": hunter.handle_text(text, channel="web")})
+            if path == "/search":
+                terms = str(data.get("query", "")).strip()[:200]
+                if not terms:
+                    return self.send_json({"error": "query is required"}, 400)
+                report = hunter.search(query=terms, location=str(data.get("location", "")).strip()[:120] or None,
+                                       reason="search in the app", notify=False)
+                if report.get("busy"):
+                    return self.send_json({"error": "A search is already running — try again in a minute"}, 409)
+                return self.send_json({"results": report["results"][:50], "errors": report["errors"],
+                                       "per_source": report["per_source"], "fetched": report["fetched"]})
+            if path == "/run":
+                threading.Thread(target=hunter.search, kwargs={"reason": "requested in the app"}, daemon=True).start()
+                return self.send_json({"started": True}, 202)
+            if path == "/inbox":
+                return self.send_json(hunter.check_inbox())
+            if path == "/start":
+                result = hunter.start()
+                if result.get("running"):
+                    hunter.update_profile({"autostart": True})
+                return self.send_json(result, 200 if result.get("running") else 409)
+            if path == "/stop":
+                hunter.update_profile({"autostart": False})
+                return self.send_json(hunter.stop())
+            if path == "/email":
+                return self.jobhunter_email(hunter, data)
+            if path == "/email/test":
+                used = hunter.notify_owner("✅ Job Hunter is connected",
+                                           "This is a test from your Job Hunter agent. Reply \"status\" or \"help\" "
+                                           "and I'll answer within a few minutes while I'm running.", kind="notice")
+                return self.send_json({"sent": used}, 200 if used.get("email") else 502)
+            if path == "/jobs":
+                url = str(data.get("url", "")).strip()
+                if not url.startswith(("https://", "http://")):
+                    return self.send_json({"error": "A job link (https://…) is required"}, 400)
+                return self.send_json({"message": hunter.track_url(url, str(data.get("title", "")).strip()[:200])}, 201)
+            if path.startswith("/jobs/"):
+                parts = path.split("/")
+                if len(parts) != 4:
+                    return self.send_json({"error": "Not found"}, 404)
+                job_id, action = parts[2].upper(), parts[3]
+                actions = {"apply": hunter.prepare_application, "send": hunter.send_draft, "cancel": hunter.cancel_draft,
+                           "applied": hunter.mark_applied, "followup": hunter.draft_followup, "open": hunter.open_job}
+                statuses = {"skip": "skipped", "save": "interested", "interview": "interview", "assessment": "assessment",
+                            "offer": "offer", "rejected": "rejected", "close": "closed", "reopen": "interested"}
+                if action in actions:
+                    message = actions[action](job_id)
+                elif action in statuses:
+                    message = hunter.set_status(job_id, statuses[action])
+                elif action == "reply":
+                    message = hunter.draft_reply(job_id, str(data.get("text", "")).strip()[:4000])
+                else:
+                    return self.send_json({"error": "Unknown action"}, 404)
+                return self.send_json({"message": message, "job": hunter.store.get_job(job_id)})
+            if path.startswith("/drafts/"):
+                draft = hunter.store.get_draft(path.split("/")[2])
+                if draft["status"] != "draft":
+                    return self.send_json({"error": "This email was already sent or cancelled"}, 409)
+                changes = {k: str(data[k])[:20000] for k in ("to_addr", "subject", "body") if k in data}
+                if "to_addr" in changes and "@" not in changes["to_addr"]:
+                    return self.send_json({"error": "Enter a valid email address"}, 400)
+                return self.send_json(hunter.store.update_draft(draft["id"], **changes))
+            return self.send_json({"error": "Not found"}, 404)
+        except KeyError as exc:
+            return self.send_json({"error": str(exc).strip("'\"")}, 404)
+        except ValueError as exc:
+            return self.send_json({"error": str(exc)}, 400)
+        except Exception as exc:
+            return self.send_json({"error": "Job Hunter error", "detail": str(exc)}, 500)
+
+    def jobhunter_email(self, hunter, data):
+        from jobhunter.config import mail_settings, save_env_values
+        from jobhunter.mailbox import Mailbox, MailError
+        address = str(data.get("address", "")).strip()
+        if "@" not in address:
+            return self.send_json({"error": "Enter the email address the agent should use"}, 400)
+        values = {"JOBHUNTER_EMAIL": address}
+        password = str(data.get("password", "")).replace(" ", "").strip()
+        if password:
+            values["JOBHUNTER_EMAIL_PASSWORD"] = password
+        for key, env_key in (("imap_host", "JOBHUNTER_IMAP_HOST"), ("smtp_host", "JOBHUNTER_SMTP_HOST"),
+                             ("smtp_port", "JOBHUNTER_SMTP_PORT")):
+            value = str(data.get(key, "")).strip()
+            if value:
+                values[env_key] = value
+        settings = mail_settings({**os.environ, **values})
+        if not settings.configured:
+            return self.send_json({"error": "Add the app password (and IMAP/SMTP servers for non-Gmail/Outlook/Yahoo/iCloud addresses)"}, 400)
+        try:
+            Mailbox(settings).test()
+        except MailError as exc:
+            return self.send_json({"error": str(exc)}, 400)
+        save_env_values(values, ROOT / ".env")
+        owners = data.get("owner_emails")
+        if owners:
+            hunter.update_profile({"owner_emails": owners})
+        hunter.store.event("agent", f"Email connected: {address}")
+        return self.send_json({"ok": True, "email": settings.public()})
+
+    def jobhunter_cv(self, hunter):
+        size = int(self.headers.get("Content-Length", "0"))
+        name = Path(self.headers.get("X-Filename", "cv.pdf")).name
+        if not 0 < size <= 10 * 1024 * 1024:
+            return self.send_json({"error": "CV must be between 1 byte and 10 MB"}, 400)
+        if Path(name).suffix.lower() not in CV_EXTENSIONS:
+            return self.send_json({"error": "Upload a PDF, DOCX, DOC, ODT, RTF or TXT file"}, 400)
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", name).strip("._") or "cv.pdf"
+        folder = hunter.data_dir / "cv"
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / safe
+        target.write_bytes(self.rfile.read(size))
+        hunter.update_profile({"cv_path": str(target)})
+        return self.send_json({"cv": safe}, 201)
+
     def chat_request(self, slug, model_override=None, model_id_override=None):
         data = self.body_json()
         content = data.get("content")
@@ -477,6 +684,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path.startswith("/api/jobhunter/"):
+            return self.jobhunter_request("POST")
         if path.startswith("/api/agents/") and path.endswith("/messages"):
             try:
                 return self.chat_request(path.split("/")[3])
@@ -519,6 +728,7 @@ class Handler(BaseHTTPRequestHandler):
                 new_lines.append(f'TELEGRAM_BOT_TOKEN={token}')
             env_path.write_text("\n".join(new_lines) + "\n")
             TELEGRAM_BOT_TOKEN = token
+            os.environ["TELEGRAM_BOT_TOKEN"] = token  # visible to the job hunter too
             start_telegram_polling()
             return self.send_json({"ok": True, "bot_username": result.get("result", {}).get("username", "unknown")})
         if path == "/api/notion/configure":
@@ -913,6 +1123,13 @@ def main():
         parser.error("Personal OS must bind to localhost because it uses local signed-in AI accounts")
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     started = start_telegram_polling()
+    try:
+        hunter = get_hunter()
+        if hunter.profile()["autostart"] or os.environ.get("JOBHUNTER_AUTOSTART") == "1":
+            result = hunter.start()
+            print("Job Hunter: " + ("running" if result.get("running") else result.get("error", "not started")), flush=True)
+    except Exception as exc:
+        print(f"Job Hunter could not start: {exc}", flush=True)
     print(f"Personal OS running at http://{args.host}:{args.port} (Claude Code / Codex chat){' | Telegram polling active' if started else ' | Telegram: set TELEGRAM_BOT_TOKEN'}", flush=True)
     try: server.serve_forever()
     except KeyboardInterrupt: pass

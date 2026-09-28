@@ -131,7 +131,7 @@ Key pages to create:
 | Limitation | Workaround |
 |---|---|
 | No automatic LinkedIn apply | Open agent browser → manual apply → record in Job Tracker |
-| No email sending yet | Connect Gmail via Hermes → OAuth flow |
+| Email only in Job Hunter | Job Hunter reads/sends via IMAP/SMTP app password (`docs/JOB-HUNTER.md`); other agents still draft only |
 | n8n runs separately | n8n manages its own credential store |
 | Browser profiles not sandboxed | Don't log into high-value accounts in agent browsers |
 | No mobile UI | Designed for desktop (1024px+); works on tablet |
