@@ -24,4 +24,4 @@ echo; echo "Sending you a test email…"; python3 -m jobhunter test-email || ech
 echo; echo "First search (this can take a minute)…"; python3 -m jobhunter once
 echo; python3 -m jobhunter install-service
 echo; python3 -m jobhunter doctor
-echo; echo "Done. Reply to the agent's emails with 'help', or open http://127.0.0.1:8765/#hunter (python3 server.py)."
+echo; echo "Done. Reply to the agent's emails with 'help', or open http://127.0.0.1:8765/dashboard (python3 server.py)."

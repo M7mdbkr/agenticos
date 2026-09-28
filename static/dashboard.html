@@ -6,8 +6,9 @@
 <title>Job Hunter Dashboard</title>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <style>
-:root{--bg:#0f1115;--card:#181b22;--card2:#20242d;--line:#2c313c;--ink:#f2f4f8;--ink2:#a8afbd;--ink3:#6f7684;
---blue:#3b82f6;--green:#22c55e;--orange:#f59e0b;--red:#ef4444;--purple:#a855f7;--r:14px}
+:root{--bg:#0d0d0f;--card:#1c1c1e;--card2:#2c2c2e;--line:rgba(255,255,255,0.10);--ink:#f5f5f7;--ink2:#a1a1a6;--ink3:#636366;
+--blue:#007AFF;--green:#34C759;--orange:#FF9500;--red:#FF3B30;--purple:#AF52DE;--r:16px;
+--sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",Arial,sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,"Segoe UI",Tahoma,sans-serif}
 a{color:var(--blue)}
@@ -20,7 +21,7 @@ h2{font-size:18px;margin-bottom:10px}
 button,.btn{border:1px solid var(--line);background:var(--card2);color:var(--ink);border-radius:10px;padding:8px 14px;font:inherit;font-size:14px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
 button:hover,.btn:hover{border-color:var(--ink3)}
 button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
-button.good{background:var(--green);border-color:var(--green);color:#04130a;font-weight:600}
+button.good{background:var(--green);border-color:var(--green);color:#03170a;font-weight:600}
 button.danger{color:var(--red)}
 button:disabled{opacity:.5;cursor:wait}
 .pill{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;background:var(--card2);border:1px solid var(--line);color:var(--ink2)}
@@ -58,7 +59,7 @@ dialog::backdrop{background:#000a}
 <body>
 <div class="wrap">
   <header>
-    <div><h1>🔎 Job Hunter</h1><div class="muted" id="state">Loading…</div></div>
+    <div><a href="/" class="muted" style="text-decoration:none">← AgenticOS</a><h1>🔎 Job Hunter</h1><div class="muted" id="state">Loading…</div></div>
     <div class="row" id="controls"></div>
   </header>
   <div id="alerts"></div>
@@ -131,9 +132,9 @@ function render() {
     ['Interviews & offers', c.interview + c.assessment + c.offer, 'var(--purple)'],
   ].map(([t, n, col]) => `<div class="stat"><b style="color:${col}">${n}</b><span class="muted">${t}</span></div>`).join('');
   const tabs = [['jobs','Jobs'],['drafts',`Waiting for OK ${s.drafts.length ? '('+s.drafts.length+')' : ''}`],['mine','My applications'],
-                ['cards','Cards & companies'],['settings','Settings'],['ask','Ask'],['log','Activity']];
+                ['cards','Cards & companies'],['cv','CV'],['settings','Settings'],['ask','Ask'],['log','Activity']];
   $('#tabs').innerHTML = tabs.map(([k, t]) => `<button class="${S.tab === k ? 'on' : ''}" onclick="tab('${k}')">${t}</button>`).join('');
-  ({jobs: viewJobs, drafts: viewDrafts, mine: viewMine, cards: viewCards, settings: viewSettings, ask: viewAsk, log: viewLog})[S.tab]();
+  ({jobs: viewJobs, drafts: viewDrafts, mine: viewMine, cards: viewCards, cv: viewCv, settings: viewSettings, ask: viewAsk, log: viewLog})[S.tab]();
 }
 function tab(k) { S.tab = k; localStorage.setItem('jh-tab', k); render(); }
 
@@ -199,6 +200,25 @@ async function viewCards() {
     <h2 style="margin-top:8px">Contacts (${contacts.length})</h2>
     <div class="grid">${contacts.map(c => `<div class="card"><b dir="auto">${esc(c.name || c.email)}</b><div class="muted" dir="auto">${esc([c.title, c.company].filter(Boolean).join(' · '))}</div>
       <div class="muted">${esc([c.email, c.phone].filter(Boolean).join(' · '))}</div></div>`).join('') || '<div class="card muted">No cards yet.</div>'}</div>`;
+}
+async function viewCv() {
+  const master = (await api('/cv/master')).text;
+  $('#view').innerHTML = `<div class="card"><h2>Master CV</h2>
+    <p class="muted">Everything true about you, written once. For every job the agent makes a Word CV that puts the most relevant projects, bullets and skills first — it never adds anything that isn't here.</p>
+    <div class="row" style="margin:10px 0"><label class="btn">Import .docx / .md<input type="file" accept=".docx,.md,.txt" hidden onchange="importCv(this)"></label>
+      <span class="muted">Format: <code># Name</code> · contact line · <code>## Section</code> · <code>### Entry</code> · <code>- bullet</code></span></div>
+    <textarea id="masterCv" rows="24" spellcheck="false" style="font-family:ui-monospace,monospace;font-size:12.5px">${esc(master)}</textarea>
+    <div class="row" style="margin-top:10px"><button class="good" onclick="saveCv()">Save master CV</button></div></div>`;
+}
+async function saveCv() {
+  try { const r = await api('/cv/master', {text: $('#masterCv').value}); toast(`Saved ✅ (${r.sections.length} sections)`); await load(); }
+  catch (e) { toast(e.message); }
+}
+async function importCv(input) {
+  const file = input.files[0]; if (!file) return;
+  try { const r = await api('/cv/import', file, {'X-Filename': file.name, 'Content-Type': 'application/octet-stream'});
+        $('#masterCv').value = r.text; toast('Imported — check it, then Save'); }
+  catch (e) { toast(e.message); }
 }
 function viewSettings() {
   const p = S.profile, s = S.status;
@@ -317,7 +337,7 @@ async function doctor() {
   } catch (e) { $('#dlgBody').innerHTML = `<h2>Health check</h2><div class="card alert">${esc(e.message)}</div>`; }
 }
 load().catch(e => { $('#state').textContent = 'The agent is not running: ' + e.message; });
-setInterval(() => { if (!document.querySelector('dialog[open]') && !['settings','ask','cards'].includes(S.tab)) load().catch(() => {}); }, 30000);
+setInterval(() => { if (!document.querySelector('dialog[open]') && !['settings','ask','cards','cv'].includes(S.tab)) load().catch(() => {}); }, 30000);
 </script>
 </body>
 </html>

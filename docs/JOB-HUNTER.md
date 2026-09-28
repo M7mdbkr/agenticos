@@ -44,13 +44,13 @@ python3 -m jobhunter setup        # asks for roles, skills, locations, CV and yo
 python3 -m jobhunter once         # first search + inbox check
 ```
 
-Or open **http://127.0.0.1:8765/#hunter** (run `python3 server.py`) → **Settings** tab.
+Or open **http://127.0.0.1:8765/dashboard** (run `python3 server.py`) → **Settings** tab.
 
 ### Email (Gmail)
 
 1. Turn on 2-Step Verification: <https://myaccount.google.com/security>
 2. Create an App Password: <https://myaccount.google.com/apppasswords> → copy the 16 letters.
-3. Paste it in `setup` or in **Job Hunter → Settings → Email connection → Connect & test**.
+3. Paste it in `setup` or in **Dashboard → Settings → Email → Connect**.
 
 Outlook/Hotmail, Yahoo and iCloud work the same way (use their app passwords). Other providers:
 fill in the IMAP/SMTP servers under “Other providers”.
@@ -79,7 +79,7 @@ RSS entries on the **Job sources** page are picked up too.
 
 ## 2. Keep it running
 
-- **Inside AgenticOS:** Job Hunter page → **▶ Start agent**. It auto-starts with `server.py` from
+- **Dashboard:** `python3 -m jobhunter dashboard` → **▶ Start**. It auto-starts with `server.py` from
   then on.
 - **As a background service** (runs even when the web app is closed, starts at login):
 
@@ -156,7 +156,7 @@ automation (accounts get restricted), and a human glance before each application
 ## 5. Company websites, business cards and your master CV
 
 **Company websites.** Send any link — `add company https://company.com` (email/Telegram/Ask), or
-Job Hunter → *Contacts & companies* → Watch. It finds the careers page, detects Greenhouse / Lever /
+Dashboard → *Cards & companies* → Watch. It finds the careers page, detects Greenhouse / Lever /
 Ashby / Workable / SmartRecruiters boards and reads every open role on each search. Portals that
 only work in a browser (SAP SuccessFactors, Oracle, Workday, Taleo, Jadarat) are flagged so you
 visit them yourself.
@@ -170,7 +170,7 @@ the card has an email — prepares an application with a CV tailored to that com
 nothing goes out until you reply `send <id>`. If the photo can't be read, type it:
 `card Ahmed Ali, HR Manager, Acme, ahmed@acme.sa, 0551234567`.
 
-**Master CV → a tailored CV per job.** Write everything true about you once (Job Hunter → *CV*, or
+**Master CV → a tailored CV per job.** Write everything true about you once (Dashboard → *CV*, or
 `python3 -m jobhunter cv import ATS-1.docx`). For every application the agent writes a Word file
 that puts the projects, bullets and skills that match that job first, adds “Target role: …”, and
 trims less relevant bullets — it never adds anything that isn't in your master CV. It is attached to
