@@ -883,6 +883,10 @@ class CardAndCompanyTests(AgentCase):
                             "strict_location": True})
         self.assertFalse(score_job(sources.job("x", "IT Support", "Co", "Al Khobar, Saudi Arabia"), profile)[2])
         self.assertTrue(score_job(sources.job("x", "IT Support", "Co", "Remote", remote=True), profile)[2])
+        self.assertTrue(score_job(sources.job("x", "IT Support", "Co", "Taif, Saudi Arabia"), profile)[2])
+        country_only = score_job(sources.job("x", "IT Support", "Co", "Saudi Arabia"), profile)
+        self.assertFalse(country_only[2])
+        self.assertIn("city not specified", country_only[1])
 
     def test_add_company_command_and_arabic_commands(self):
         self.assertIn("company", self.hunter.handle_text("add company https://careers.stc.com.sa").lower())

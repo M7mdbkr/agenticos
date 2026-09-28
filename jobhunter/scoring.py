@@ -32,8 +32,18 @@ LOCATION_ALIASES = {
     "germany": ("deutschland", "berlin", "munich"),
     "remote": REMOTE_TERMS,
 }
+COUNTRY_ONLY = {"saudi arabia", "ksa", "kingdom of saudi arabia", "المملكة العربية السعودية", "السعودية"}
 STOPWORDS = {"and", "the", "for", "with", "of", "in", "to", "a", "an", "or"}
 _YEARS_RE = re.compile(r"(\d{1,2})\s*\+?\s*(?:-\s*\d{1,2}\s*)?(?:years?|yrs?)\b(?:[^.]{0,40}?experience)?")
+
+
+# Names that mean the whole country/region (they expand to every city in it). A single city never expands.
+REGION_SYNONYMS = {"ksa": "saudi arabia", "saudi": "saudi arabia", "kingdom of saudi arabia": "saudi arabia",
+                   "السعودية": "saudi arabia", "المملكة العربية السعودية": "saudi arabia",
+                   "uae": "united arab emirates", "الإمارات": "united arab emirates", "usa": "united states",
+                   "united states of america": "united states", "uk": "united kingdom", "england": "united kingdom",
+                   "eastern": "eastern province", "sharqiyah": "eastern province", "ash sharqiyah": "eastern province",
+                   "الشرقية": "eastern province", "المنطقة الشرقية": "eastern province"}
 
 
 def expand_locations(locations: List[str]) -> List[str]:
@@ -43,10 +53,10 @@ def expand_locations(locations: List[str]) -> List[str]:
         if not key:
             continue
         terms.append(key)
-        for canonical, aliases in LOCATION_ALIASES.items():
-            if key == canonical or key in aliases:
-                terms.append(canonical)
-                terms.extend(norm(a) for a in aliases)
+        region = REGION_SYNONYMS.get(key, key)
+        if region in LOCATION_ALIASES:
+            terms.append(region)
+            terms.extend(norm(a) for a in LOCATION_ALIASES[region])
     return list(dict.fromkeys(t for t in terms if t))
 
 
@@ -118,6 +128,9 @@ def score_job(job: Dict[str, Any], profile: Dict[str, Any]) -> Tuple[int, List[s
         else:
             score += 2
             reasons.append(f"remote but limited to {job.get('location')}")
+    elif wanted and location in COUNTRY_ONLY and any(w in LOCATION_ALIASES.get(location if location != "ksa" else "saudi arabia", ())
+                                                      or w in COUNTRY_ONLY for w in wanted):
+        reasons.append("city not specified")  # e.g. "Saudi Arabia" only: could be any of your cities
     elif wanted:
         if profile.get("strict_location"):
             return 0, [f"outside your locations ({job.get('location') or 'unknown'})"], True
