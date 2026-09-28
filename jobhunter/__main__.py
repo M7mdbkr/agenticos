@@ -139,28 +139,47 @@ DASHBOARD = "http://127.0.0.1:8765/dashboard"
 
 
 def cmd_dashboard(args) -> int:
-    """Open the dashboard; start the local server first if it isn't running."""
+    """Open the dashboard; start the local server first if it isn't running, and say why if it can't."""
+    import socket
     import time
     import urllib.request
     import webbrowser
 
     def up() -> bool:
         try:
-            with urllib.request.urlopen("http://127.0.0.1:8765/api/health", timeout=2):
-                return True
+            with urllib.request.urlopen("http://127.0.0.1:8765/api/jobhunter/status", timeout=3) as response:
+                return response.status == 200
         except Exception:
             return False
 
+    if args.foreground:
+        print(f"Starting the dashboard server in this window — open {DASHBOARD}  (Ctrl+C to stop)", flush=True)
+        os.environ["JOBHUNTER_AUTOSTART"] = "1"
+        os.execv(sys.executable, [sys.executable, str(ROOT / "server.py")])
     if not up():
+        with socket.socket() as probe:
+            busy = probe.connect_ex(("127.0.0.1", 8765)) == 0
+        if busy:
+            print("❌ Port 8765 is used by another program that is not the Job Hunter dashboard.")
+            print("   Find it with:  lsof -i :8765     then quit it, or restart the Mac, and run this again.")
+            return 1
         log = ROOT / "data" / "jobhunter" / "server.log"
         log.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.Popen([sys.executable, str(ROOT / "server.py")], cwd=ROOT, env={**os.environ, "JOBHUNTER_AUTOSTART": "1"},
-                         stdout=open(log, "a"), stderr=subprocess.STDOUT, start_new_session=True)
-        for _ in range(20):
+        print("Starting the dashboard server…", flush=True)
+        with open(log, "a") as out:
+            process = subprocess.Popen([sys.executable, str(ROOT / "server.py")], cwd=ROOT,
+                                       env={**os.environ, "JOBHUNTER_AUTOSTART": "1"},
+                                       stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+        for _ in range(40):
             time.sleep(0.5)
-            if up():
+            if up() or process.poll() is not None:
                 break
-    print(f"Dashboard: {DASHBOARD}")
+        if not up():
+            print("❌ The dashboard server did not start. Last lines of its log:\n")
+            print("\n".join(log.read_text(errors="replace").splitlines()[-25:]))
+            print("\nSend these lines to Claude, or try:  python3 -m jobhunter dashboard --foreground")
+            return 1
+    print(f"✅ Dashboard is running: {DASHBOARD}")
     webbrowser.open(DASHBOARD)
     return 0
 
@@ -274,7 +293,9 @@ def main(argv=None) -> int:
     doctor = sub.add_parser("doctor", help="check email, every job site, brain, card reader and service")
     doctor.add_argument("--offline", action="store_true", help="skip network checks")
     doctor.set_defaults(func=cmd_doctor)
-    sub.add_parser("dashboard", help="open the dashboard in your browser").set_defaults(func=cmd_dashboard)
+    dash = sub.add_parser("dashboard", help="open the dashboard in your browser")
+    dash.add_argument("--foreground", action="store_true", help="run the server in this window (shows every error)")
+    dash.set_defaults(func=cmd_dashboard)
     organize = sub.add_parser("organize", help="tidy the Gmail inbox: label job mail, move ads/newsletters out")
     organize.add_argument("--days", type=int, default=30)
     organize.set_defaults(func=cmd_organize)
