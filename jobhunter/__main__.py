@@ -128,6 +128,32 @@ def cmd_test_email(args) -> int:
     return 0 if used.get("email") else 1
 
 
+def cmd_card(args) -> int:
+    hunter = _hunter()
+    for item in args.photos:
+        path = Path(item).expanduser()
+        if path.is_file():
+            print(hunter.add_card_image(path.name, path.read_bytes(), source="cli"), end="\n\n")
+        else:
+            print(hunter.add_card_text(item), end="\n\n")
+    return 0
+
+
+def cmd_cv(args) -> int:
+    hunter = _hunter()
+    if args.action == "import":
+        from .cv import docx_to_master
+        source = Path(args.target).expanduser()
+        text = docx_to_master(source) if source.suffix.lower() == ".docx" else source.read_text(encoding="utf-8")
+        print(hunter.save_master_cv(text))
+        print(f"Saved to {hunter.master_cv_path} — open it and fix anything the import got wrong.")
+    elif args.action == "show":
+        print(hunter.master_cv() or "No master CV yet.")
+    else:
+        print(hunter.cv_text(args.target))
+    return 0
+
+
 def cmd_install_service(args) -> int:
     python = sys.executable
     log_dir = ROOT / "data" / "jobhunter"
@@ -200,6 +226,13 @@ def main(argv=None) -> int:
     ask.add_argument("text", nargs="+")
     ask.set_defaults(func=cmd_ask)
     sub.add_parser("test-email", help="send yourself a test email").set_defaults(func=cmd_test_email)
+    card = sub.add_parser("card", help="save business cards: photo files or typed details")
+    card.add_argument("photos", nargs="+", help='photo paths, or text like "Ahmed, HR, Acme, ahmed@acme.com"')
+    card.set_defaults(func=cmd_card)
+    cvp = sub.add_parser("cv", help="master CV: import <file.docx|.md> · show · tailor <job id>")
+    cvp.add_argument("action", choices=["import", "show", "tailor"])
+    cvp.add_argument("target", nargs="?", default=None)
+    cvp.set_defaults(func=cmd_cv)
     service = sub.add_parser("install-service", help="start automatically with your laptop (macOS/Linux)")
     service.add_argument("--dry-run", action="store_true", help="write the file but don't activate it")
     service.set_defaults(func=cmd_install_service)

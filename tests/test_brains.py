@@ -14,7 +14,9 @@ class ProviderStatusTests(unittest.TestCase):
                         "authMethod": "claude.ai", "subscriptionType": "pro",
                         "email": "private@example.invalid", "apiKey": "private-token"}), "")]
         with mock.patch.object(brains, "_executable", return_value="/safe/cli"), \
-             mock.patch.object(brains, "_run", create=True, side_effect=outcomes):
+             mock.patch.object(brains, "_run", create=True, side_effect=outcomes), \
+             mock.patch.object(brains, "_ollama_status", return_value={"installed": True, "authenticated": True,
+                                                                        "note": "Local server OK"}):
             statuses = brains.provider_status()
         self.assertTrue(all(s["authenticated"] for s in statuses.values()))
         self.assertNotIn("private", json.dumps(statuses))

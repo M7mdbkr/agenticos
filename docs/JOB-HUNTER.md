@@ -127,13 +127,41 @@ used. Cover letters only use the facts in your profile; job text is treated as d
 Form-filling on websites is deliberately not automated: sites use CAPTCHAs, LinkedIn forbids
 automation (accounts get restricted), and a human glance before each application avoids mistakes.
 
-## 5. Files and privacy
+## 5. Company websites, business cards and your master CV
+
+**Company websites.** Send any link — `add company https://company.com` (email/Telegram/Ask), or
+Job Hunter → *Contacts & companies* → Watch. It finds the careers page, detects Greenhouse / Lever /
+Ashby / Workable / SmartRecruiters boards and reads every open role on each search. Portals that
+only work in a browser (SAP SuccessFactors, Oracle, Workday, Taleo, Jadarat) are flagged so you
+visit them yourself.
+
+**Business cards.** Photograph the card and send it: attach it to an email to the agent (subject
+`كرت` or `card`, or no subject when you use a dedicated mailbox), send the photo to the Telegram
+bot, use *📷 Photo of a card* in the app, or `python3 -m jobhunter card IMG_1234.jpg`. It reads the
+card with a local vision model (`ollama pull llama3.2-vision`) or `tesseract`
+(`brew install tesseract tesseract-lang`), saves the contact, watches the company website, and — if
+the card has an email — prepares an application with a CV tailored to that company. As always,
+nothing goes out until you reply `send <id>`. If the photo can't be read, type it:
+`card Ahmed Ali, HR Manager, Acme, ahmed@acme.sa, 0551234567`.
+
+**Master CV → a tailored CV per job.** Write everything true about you once (Job Hunter → *CV*, or
+`python3 -m jobhunter cv import ATS-1.docx`). For every application the agent writes a Word file
+that puts the projects, bullets and skills that match that job first, adds “Target role: …”, and
+trims less relevant bullets — it never adds anything that isn't in your master CV. It is attached to
+email applications automatically, downloadable from each job card (“CV for this job”), and
+`cv <id>` gives you the file path for website uploads.
+
+Arabic commands work too: `وظائف` · `ابحث مهندس شبكات في الرياض` · `قدم 1` · `ارسل 7K2QX` ·
+`تخطى 2` · `قدمت 7K2QX` · `الحالة` · `كرت …` · `اضف شركة https://…`.
+
+## 6. Files and privacy
 
 | What | Where (git-ignored) |
 |---|---|
 | Jobs, drafts, mail log, activity | `data/jobhunter/jobhunter.db` |
 | Profile (no secrets) | `data/jobhunter/profile.json` |
-| CV uploaded in the app, cover letters | `data/jobhunter/cv/`, `data/jobhunter/letters/` |
+| Master CV, tailored CVs, cover letters | `data/jobhunter/master_cv.md`, `data/jobhunter/cv/tailored/`, `data/jobhunter/letters/` |
+| Business-card photos | `data/jobhunter/cards/` |
 | Mail password, API keys, bot token | `.env` (mode 600) |
 
 Email commands are accepted only from your address(es) and only when the message passes the

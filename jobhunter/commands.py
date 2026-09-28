@@ -16,6 +16,8 @@ _PREFIX = re.compile(r"^/?(?:job ?hunter|jobs?|jh|agent)\s*[:,\-]\s*", re.I)
 FIELDS = {"role": "roles", "roles": "roles", "skill": "skills", "skills": "skills", "keyword": "skills",
           "keywords": "skills", "location": "locations", "locations": "locations", "city": "locations",
           "country": "locations", "exclude": "exclude", "excludes": "exclude", "board": "greenhouse_boards",
+          "company": "company_sites", "companies": "company_sites", "site": "company_sites", "website": "company_sites",
+          "شركة": "company_sites", "موقع": "company_sites",
           "lever": "lever_boards", "feed": "rss_feeds", "rss": "rss_feeds", "email": "owner_emails"}
 
 
@@ -35,7 +37,14 @@ class Commands:
     def __init__(self, hunter: "JobHunter"):
         self.hunter = hunter
         self.routes: List[Tuple[re.Pattern, Callable[..., str]]] = [
-            (re.compile(r"^/?(help|commands|\?|start)$", re.I), lambda m, c: COMMAND_HELP),
+            (re.compile(r"^/?(help|commands|\?|start|مساعدة|الأوامر|الاوامر)$", re.I), lambda m, c: COMMAND_HELP),
+            (re.compile(r"^(الحالة|حالة|وضعي)$"), lambda m, c: self.hunter.status_text()),
+            (re.compile(r"^(وظائف|وظايف|الوظائف)(?:\s+(\d{1,2}))?$"), lambda m, c: self.list_jobs(m, c)),
+            (re.compile(r"^(?:ابحث|دور)\s+(?:عن\s+)?(.+?)(?:\s+(?:في|ب)\s+(.+))?$"), self.search),
+            (re.compile(r"^(قدم|قدّم|جهز)\s+(.+)$"), self.each(lambda jid: self.hunter.prepare_application(jid))),
+            (re.compile(r"^(ارسل|أرسل|ارسله|اعتمد)\s+(.+)$"), self.each(lambda jid: self.hunter.send_draft(jid))),
+            (re.compile(r"^(تخطى|تخطي|لا)\s+(.+)$"), self.each(lambda jid: self.hunter.set_status(jid, "skipped"))),
+            (re.compile(r"^(قدمت|تم)\s+(.+)$"), self.each(lambda jid: self.hunter.mark_applied(jid))),
             (re.compile(r"^/?(status|summary|report|pipeline)$", re.I), lambda m, c: self.hunter.status_text()),
             (re.compile(r"^/?(jobs|list|top|matches|show jobs)(?:\s+(\d{1,2}))?$", re.I), self.list_jobs),
             (re.compile(r"^/?(run|check|refresh|search now|find jobs|find)$", re.I), self.run_now),
@@ -54,7 +63,11 @@ class Commands:
             (re.compile(r"^/?note\s+(\S+)\s+(.+)$", re.I), self.note),
             (re.compile(r"^/?(pause|stop)$", re.I), lambda m, c: self.hunter.set_paused(True)),
             (re.compile(r"^/?(resume|unpause|go)$", re.I), lambda m, c: self.hunter.set_paused(False)),
-            (re.compile(r"^/?(add|remove)\s+(\w+)\s+(.+)$", re.I), self.edit_profile),
+            (re.compile(r"^/?(add|remove|أضف|اضف|احذف)\s+(\w+)\s+(.+)$", re.I), self.edit_profile),
+            (re.compile(r"^/?(card|contact|كرت|بطاقة)\s+(.+)$", re.I), lambda m, c: self.hunter.add_card_text(m.group(2))),
+            (re.compile(r"^/?(contacts|cards|جهات الاتصال|الكروت)$", re.I), lambda m, c: self.hunter.contacts_text()),
+            (re.compile(r"^/?(cv|resume|سيرة|السيرة)(?:\s+(\S+))?$", re.I),
+             lambda m, c: self.hunter.cv_text(self.resolve(m.group(2)) if m.group(2) else None)),
             (re.compile(r"^/?set\s+(min(?:imum)?\s*score|level)\s+(\S+)$", re.I), self.set_setting),
             (re.compile(r"^/?(?:track|add job)\s+(https?://\S+)(?:\s+(.+))?$", re.I), self.track),
             (re.compile(r"^(https?://\S+)$", re.I), self.track),
@@ -161,7 +174,7 @@ class Commands:
 
     def edit_profile(self, match, channel) -> str:
         action, field, value = match.group(1).lower(), FIELDS[match.group(2).lower()], match.group(3).strip()
-        return self.hunter.edit_profile_list(field, value, add=(action == "add"))
+        return self.hunter.edit_profile_list(field, value, add=action in ("add", "أضف", "اضف"))
 
     def set_setting(self, match, channel) -> str:
         key = "level" if match.group(1).lower() == "level" else "min_score"

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import cgi
 import json
 import mimetypes
 import os
@@ -43,6 +42,32 @@ TELEGRAM_POLLING_RUNNING = False
 TELEGRAM_POLLING_STOP = threading.Event()
 TELEGRAM_PENDING = []  # incoming updates from polling thread
 TELEGRAM_LOCK = threading.Lock()
+
+
+def parse_multipart(headers, stream):
+    """multipart/form-data → ({field: text}, {field: (filename, bytes)}). Replaces the cgi module (gone in Python 3.13)."""
+    from email.parser import BytesParser
+    from email import policy as email_policy
+    ctype = headers.get("Content-Type", "")
+    if not ctype.lower().startswith("multipart/form-data"):
+        raise ValueError("multipart/form-data required")
+    size = int(headers.get("Content-Length", "0"))
+    if size > MAX_UPLOAD + 1_000_000:
+        raise ValueError("File exceeds 25 MB")
+    raw = b"Content-Type: " + ctype.encode("latin-1") + b"\r\nMIME-Version: 1.0\r\n\r\n" + stream.read(size)
+    message = BytesParser(policy=email_policy.HTTP).parsebytes(raw)
+    fields, files = {}, {}
+    for part in message.iter_parts():
+        name = part.get_param("name", header="content-disposition")
+        if not name:
+            continue
+        payload = part.get_payload(decode=True) or b""
+        filename = part.get_filename()
+        if filename is not None:
+            files[name] = (filename, payload)
+        else:
+            fields[name] = payload.decode("utf-8", errors="replace")
+    return fields, files
 
 
 def store_request(method):
@@ -142,6 +167,8 @@ def telegram_polling_thread(bot_token: str, update_queue: list) -> None:
             voice = msg.get("voice")
             if text and _jobhunter_telegram(str(chat.get("id", "")), text):
                 continue
+            if msg.get("photo") and _jobhunter_telegram_photo(str(chat.get("id", "")), msg["photo"]):
+                continue
             # Only handle text or voice messages
             if text or voice:
                 update_queue.append({
@@ -213,6 +240,31 @@ def _jobhunter_telegram(chat_id: str, text: str) -> bool:
         telegram_send(TELEGRAM_BOT_TOKEN, chat_id, reply)
 
     threading.Thread(target=answer, daemon=True, name="jobhunter-telegram").start()
+    return True
+
+
+def _jobhunter_telegram_photo(chat_id: str, photos: list) -> bool:
+    """A photo sent from the Job Hunter chat is treated as a business card."""
+    try:
+        hunter = get_hunter()
+        if not hunter.profile()["telegram_chat_id"] or hunter.profile()["telegram_chat_id"] != chat_id:
+            return False
+    except Exception:
+        return False
+    largest = max(photos, key=lambda p: p.get("file_size", 0) or p.get("width", 0))
+
+    def work():
+        from jobhunter.notify import telegram_send
+        try:
+            info = _telegram_api("getFile", {"file_id": largest["file_id"]})
+            with urllib.request.urlopen(_telegram_download_url(info["file_path"]), timeout=30) as response:
+                data = response.read(15_000_000)
+            reply = hunter.add_card_image(Path(info["file_path"]).name or "card.jpg", data, source="telegram")
+        except Exception as exc:
+            reply = f"Couldn't save that card: {exc}"
+        telegram_send(TELEGRAM_BOT_TOKEN, chat_id, reply)
+
+    threading.Thread(target=work, daemon=True, name="jobhunter-card").start()
     return True
 
 
@@ -472,8 +524,14 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json(hunter.store.list_jobs(
                         statuses=statuses or None, min_score=int(query.get("min_score") or 0), query=query.get("q", "")[:100],
                         limit=int(query.get("limit") or 200), order=query.get("order", "score")))
+                if path.startswith("/jobs/") and path.endswith("/cv"):
+                    return self.jobhunter_download(hunter.tailored_cv(path.split("/")[2]))
                 if path.startswith("/jobs/"):
                     return self.send_json(hunter.store.get_job(path.split("/")[2]))
+                if path == "/contacts":
+                    return self.send_json(hunter.store.list_contacts())
+                if path == "/cv/master":
+                    return self.send_json({"text": hunter.master_cv()})
                 if path == "/drafts":
                     return self.send_json(hunter.store.list_drafts())
                 if path == "/activity":
@@ -481,11 +539,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "Not found"}, 404)
             if path == "/cv":
                 return self.jobhunter_cv(hunter)
+            if path in ("/cards", "/cv/import"):
+                return self.jobhunter_raw_upload(hunter, path)
             data = self.body_json()
             if not isinstance(data, dict):
                 raise ValueError("JSON object expected")
             if path == "/profile":
                 return self.send_json(hunter.update_profile(data))
+            if path == "/cv/master":
+                return self.send_json(hunter.save_master_cv(str(data.get("text", ""))))
+            if path == "/contacts":
+                text = str(data.get("text", "")).strip()[:1000]
+                if not text:
+                    return self.send_json({"error": "Type the card details"}, 400)
+                return self.send_json({"message": hunter.add_card_text(text)}, 201)
             if path == "/ask":
                 text = str(data.get("text", "")).strip()
                 if not text or len(text) > 4000:
@@ -588,6 +655,39 @@ class Handler(BaseHTTPRequestHandler):
             hunter.update_profile({"owner_emails": owners})
         hunter.store.event("agent", f"Email connected: {address}")
         return self.send_json({"ok": True, "email": settings.public()})
+
+    def jobhunter_raw_upload(self, hunter, path):
+        size = int(self.headers.get("Content-Length", "0"))
+        name = Path(self.headers.get("X-Filename", "upload")).name
+        if not 0 < size <= 15 * 1024 * 1024:
+            return self.send_json({"error": "File must be between 1 byte and 15 MB"}, 400)
+        suffix = Path(name).suffix.lower()
+        if path == "/cards":
+            if suffix not in {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"}:
+                return self.send_json({"error": "Upload a photo (JPG, PNG or HEIC)"}, 400)
+            return self.send_json({"message": hunter.add_card_image(name, self.rfile.read(size), source="upload")}, 201)
+        if suffix not in {".docx", ".txt", ".md"}:
+            return self.send_json({"error": "Import a .docx, .txt or .md CV"}, 400)
+        data = self.rfile.read(size)
+        if suffix == ".docx":
+            import io
+            from jobhunter.cv import docx_to_master
+            text = docx_to_master(io.BytesIO(data))
+        else:
+            text = data.decode("utf-8", errors="replace")
+        return self.send_json({"text": text})
+
+    def jobhunter_download(self, target):
+        if not target or not Path(target).is_file():
+            return self.send_json({"error": "Add your master CV first (Job Hunter → CV)"}, 404)
+        data = Path(target).read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        self.send_header("Content-Disposition", f'attachment; filename="{Path(target).name}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(data)
 
     def jobhunter_cv(self, hunter):
         size = int(self.headers.get("Content-Length", "0"))
@@ -873,16 +973,11 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             if path == "/api/resume/upload":
-                ctype, params = cgi.parse_header(self.headers.get("Content-Type", ""))
-                if ctype != "multipart/form-data":
-                    raise ValueError("multipart/form-data required")
-                form = cgi.FieldStorage(fp=self.rfile, headers=self.headers,
-                                       environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": self.headers["Content-Type"]})
-                item = form["file"]
-                content = item.file.read(MAX_UPLOAD + 1)
+                _, files = parse_multipart(self.headers, self.rfile)
+                filename, content = files["file"]
                 if len(content) > MAX_UPLOAD:
                     raise ValueError("File exceeds 25 MB")
-                return self.send_json(STORE.save_base_resume(item.filename, content), 201)
+                return self.send_json(STORE.save_base_resume(filename, content), 201)
             if path == "/api/jobs":
                 return self.send_json(STORE.create_job_application(self.body_json()), 201)
             if path == "/api/jobs/search":
@@ -997,12 +1092,10 @@ BODY: <email body>"""
             if path.startswith("/api/resources/"):
                 return self.send_json(STORE.create_resource(path.split("/")[3], self.body_json()), 201)
             if path == "/api/upload":
-                ctype, params = cgi.parse_header(self.headers.get("Content-Type", ""))
-                if ctype != "multipart/form-data": raise ValueError("multipart/form-data required")
-                form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": self.headers["Content-Type"]})
-                item = form["file"]; content = item.file.read(MAX_UPLOAD + 1)
+                fields, files = parse_multipart(self.headers, self.rfile)
+                filename, content = files["file"]
                 if len(content) > MAX_UPLOAD: raise ValueError("File exceeds 25 MB")
-                return self.send_json(STORE.save_upload(form.getfirst("agent_slug", "ceo"), item.filename, content), 201)
+                return self.send_json(STORE.save_upload(fields.get("agent_slug", "ceo"), filename, content), 201)
             if path == "/api/news":
                 data = self.body_json(); return self.send_json(STORE.add_news_item(data["title"], data.get("summary", ""), data.get("url", "")), 201)
             if path.startswith("/api/news/") and path.endswith("/script"):

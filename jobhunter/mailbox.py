@@ -46,6 +46,7 @@ class IncomingMail:
     agent_header: str = ""
     auto_submitted: str = ""
     list_unsubscribe: bool = False
+    images: List[Tuple[str, bytes]] = field(default_factory=list)  # (filename, bytes) of attached photos
 
     @property
     def thread_ids(self) -> List[str]:
@@ -64,10 +65,18 @@ def parse_message(raw: bytes, uid: int = 0) -> IncomingMail:
     msg = message_from_bytes(raw, policy=policy.default)
     text_parts: List[str] = []
     html_parts: List[str] = []
+    images: List[Tuple[str, bytes]] = []
     for part in msg.walk():
-        if part.is_multipart() or part.get_content_disposition() == "attachment":
+        if part.is_multipart():
             continue
         ctype = part.get_content_type()
+        if ctype.startswith("image/") and part.get_content_disposition() in ("attachment", "inline"):
+            data = part.get_payload(decode=True) or b""
+            if 1_000 < len(data) <= 15_000_000 and len(images) < 10:  # skip tiny logos/signature icons
+                images.append((part.get_filename() or f"photo{len(images) + 1}.{ctype.split('/')[1]}", data))
+            continue
+        if part.get_content_disposition() == "attachment":
+            continue
         if ctype == "text/plain":
             text_parts.append(_decode_part(part))
         elif ctype == "text/html":
@@ -97,6 +106,7 @@ def parse_message(raw: bytes, uid: int = 0) -> IncomingMail:
         agent_header=str(msg.get(AGENT_HEADER, "") or ""),
         auto_submitted=str(msg.get("Auto-Submitted", "") or "").lower(),
         list_unsubscribe=bool(msg.get("List-Unsubscribe")),
+        images=images,
     )
 
 

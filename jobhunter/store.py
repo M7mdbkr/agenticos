@@ -88,6 +88,12 @@ class JobStore:
               id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, message TEXT NOT NULL,
               detail_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS contacts(
+              id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '',
+              company TEXT NOT NULL DEFAULT '', email TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '',
+              website TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', image_path TEXT NOT NULL DEFAULT '',
+              source TEXT NOT NULL DEFAULT 'manual', job_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS runs(
               id INTEGER PRIMARY KEY AUTOINCREMENT, reason TEXT NOT NULL, started_at TEXT NOT NULL,
               finished_at TEXT, fetched INTEGER NOT NULL DEFAULT 0, new INTEGER NOT NULL DEFAULT 0,
@@ -95,6 +101,9 @@ class JobStore:
               errors_json TEXT NOT NULL DEFAULT '{}'
             );
             """)
+            columns = {r[1] for r in self.db.execute("PRAGMA table_info(outbox)")}
+            if "attachment" not in columns:  # added after the first release
+                self.db.execute("ALTER TABLE outbox ADD COLUMN attachment TEXT NOT NULL DEFAULT ''")
             self.db.commit()
 
     # ── rows ────────────────────────────────────────────────────────────────
@@ -255,14 +264,15 @@ class JobStore:
 
     # ── outbox (emails to employers — always need your approval) ───────────
     def add_draft(self, job_id: str, kind: str, to_addr: str, subject: str, body: str,
-                  attach_cv: bool, in_reply_to: Optional[str] = None) -> Dict[str, Any]:
+                  attach_cv: bool, in_reply_to: Optional[str] = None, attachment: str = "") -> Dict[str, Any]:
         now = utcnow()
         draft_id = short_id(f"{job_id}:{kind}:{now}", 6)
         with self.lock:
             self.db.execute("UPDATE outbox SET status='replaced' WHERE job_id=? AND status='draft'", (job_id,))
             self.db.execute(
-                "INSERT INTO outbox(id,job_id,kind,to_addr,subject,body,attach_cv,in_reply_to,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (draft_id, job_id, kind, to_addr, subject, body, int(bool(attach_cv)), in_reply_to, "draft", now))
+                "INSERT INTO outbox(id,job_id,kind,to_addr,subject,body,attach_cv,in_reply_to,status,created_at,attachment) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (draft_id, job_id, kind, to_addr, subject, body, int(bool(attach_cv)), in_reply_to, "draft", now, attachment))
             self.db.commit()
         return self.get_draft(draft_id)
 
@@ -343,6 +353,50 @@ class JobStore:
     def mail_log(self, limit: int = 100) -> List[Dict[str, Any]]:
         with self.lock:
             rows = self.db.execute("SELECT * FROM mail_log ORDER BY id DESC LIMIT ?", (max(1, min(limit, 500)),)).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── contacts (from business cards) ──────────────────────────────────────
+    def add_contact(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        now = utcnow()
+        fields = ("name", "title", "company", "email", "phone", "website", "notes", "image_path", "source")
+        values = {k: str(data.get(k) or "").strip()[:500] for k in fields}
+        with self.lock:
+            if values["email"]:
+                row = self.db.execute("SELECT id FROM contacts WHERE lower(email)=lower(?)", (values["email"],)).fetchone()
+                if row:
+                    changes = {k: v for k, v in values.items() if v}
+                    changes["updated_at"] = now
+                    self.db.execute(f"UPDATE contacts SET {','.join(f'{k}=?' for k in changes)} WHERE id=?",
+                                    (*changes.values(), row[0]))
+                    self.db.commit()
+                    return self.get_contact(row[0])
+            contact_id = "C" + short_id(f"{values}:{now}", 4)
+            self.db.execute(f"INSERT INTO contacts(id,{','.join(fields)},created_at,updated_at) VALUES(?,{','.join('?' * len(fields))},?,?)",
+                            (contact_id, *values.values(), now, now))
+            self.db.commit()
+        return self.get_contact(contact_id)
+
+    def get_contact(self, contact_id: str) -> Dict[str, Any]:
+        with self.lock:
+            row = self.db.execute("SELECT * FROM contacts WHERE id=?", (contact_id.upper(),)).fetchone()
+        if not row:
+            raise KeyError(f"No contact with id {contact_id}")
+        return dict(row)
+
+    def update_contact(self, contact_id: str, **changes: Any) -> Dict[str, Any]:
+        allowed = {"name", "title", "company", "email", "phone", "website", "notes", "job_id"}
+        changes = {k: v for k, v in changes.items() if k in allowed}
+        if changes:
+            changes["updated_at"] = utcnow()
+            with self.lock:
+                self.db.execute(f"UPDATE contacts SET {','.join(f'{k}=?' for k in changes)} WHERE id=?",
+                                (*changes.values(), contact_id.upper()))
+                self.db.commit()
+        return self.get_contact(contact_id)
+
+    def list_contacts(self, limit: int = 300) -> List[Dict[str, Any]]:
+        with self.lock:
+            rows = self.db.execute("SELECT * FROM contacts ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
     # ── runs ────────────────────────────────────────────────────────────────

@@ -13,7 +13,7 @@ from typing import Any, Dict
 LEVELS = ("entry", "mid", "senior", "any")
 BRAINS = ("none", "ollama", "claude-code", "codex-cli")
 LIST_FIELDS = ("roles", "skills", "locations", "exclude", "owner_emails",
-               "greenhouse_boards", "lever_boards", "rss_feeds")
+               "greenhouse_boards", "lever_boards", "rss_feeds", "company_sites")
 
 DEFAULT_PROFILE: Dict[str, Any] = {
     # Who you are — used in cover letters. Keep it truthful; the agent never invents facts.
@@ -36,6 +36,7 @@ DEFAULT_PROFILE: Dict[str, Any] = {
     "greenhouse_boards": [],
     "lever_boards": [],
     "rss_feeds": [],
+    "company_sites": [],
     # How to reach you
     "owner_emails": [],
     "telegram_chat_id": "",
@@ -55,6 +56,8 @@ DEFAULT_PROFILE: Dict[str, Any] = {
     # Optional writing brain for cover letters and free-form questions
     "brain": "none",
     "brain_model": "",
+    # Local Ollama vision model that reads business-card photos ("" = use tesseract only)
+    "vision_model": "llama3.2-vision",
 }
 
 _INT_LIMITS = {
@@ -68,7 +71,7 @@ _INT_LIMITS = {
 _BOOL_FIELDS = ("remote_ok", "strict_location", "notify_email", "notify_telegram", "notify_desktop",
                 "notify_when_empty", "paused", "autostart", "open_browser_on_apply")
 _TEXT_LIMITS = {"name": 120, "phone": 60, "headline": 200, "summary": 2000, "cv_path": 500,
-                "telegram_chat_id": 40, "brain_model": 80}
+                "telegram_chat_id": 40, "brain_model": 80, "vision_model": 80}
 
 
 def _clean_list(value: Any) -> list:

@@ -30,7 +30,12 @@ COMMAND_HELP = """Commands (reply to any of my emails, one per line):
   status               → pipeline summary
   run                  → search all sites now
   add role|skill|location|exclude <text>, remove … <text>
+  add company <website>  → I watch that company's careers page for jobs
+  card <name, title, company, email, phone> → save a contact (or just send me a photo of the card)
+  contacts             → your saved contacts
+  cv [<id>]            → master CV status / tailored CV for a job
   pause / resume
+عربي: وظائف · ابحث <وظيفة> في <مدينة> · قدم 1 · ارسل <id> · تخطى 2 · قدمت <id> · الحالة · كرت …
 Anything else is treated as a question and answered."""
 
 

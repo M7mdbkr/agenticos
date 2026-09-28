@@ -680,6 +680,34 @@ class ServerApiTests(unittest.TestCase):
         self.assertEqual("123", replies[0][0])
         self.assertIn("Pipeline", replies[0][1])
 
+    def test_cards_master_cv_and_tailored_download(self):
+        with mock.patch("jobhunter.cards.read_card", return_value={"name": "Omar", "title": "", "company": "Tamara",
+                                                                   "email": "omar@tamara.example", "phone": "", "website": "",
+                                                                   "method": "tesseract"}):
+            code, result = self.call("/cards", raw=b"\xff\xd8" + b"0" * 2000, headers={"X-Filename": "card.jpg"})
+        self.assertEqual(201, code)
+        self.assertIn("Omar", result["message"])
+        code, contacts = self.call("/contacts")
+        self.assertEqual(["Omar"], [c["name"] for c in contacts])
+        code, _ = self.call("/cv/master", {"text": MASTER_CV})
+        self.assertEqual(200, code)
+        self.assertEqual(MASTER_CV, self.call("/cv/master")[1]["text"])
+        job_id = contacts[0]["job_id"]
+        with urlopen(self.url + f"/jobs/{job_id}/cv", timeout=10) as response:
+            self.assertEqual(200, response.status)
+            self.assertTrue(response.read().startswith(b"PK"))
+
+    def test_multipart_upload_without_cgi(self):
+        boundary = "XyZ"
+        body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"agent_slug\"\r\n\r\njob\r\n"
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"notes.txt\"\r\n"
+                f"Content-Type: text/plain\r\n\r\nhello\r\n--{boundary}--\r\n").encode()
+        req = Request(self.url.replace("/api/jobhunter", "/api/upload"), data=body,
+                      headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+        with urlopen(req, timeout=10) as response:
+            item = json.loads(response.read())
+        self.assertEqual(("job", "notes.txt", 5), (item["agent_slug"], item["original_name"], item["size"]))
+
     def test_cv_upload_and_cross_origin_block(self):
         code, result = self.call("/cv", raw=b"%PDF-1.4", headers={"X-Filename": "../My CV.pdf", "Content-Type": "application/pdf"})
         self.assertEqual((201, "My_CV.pdf"), (code, result["cv"]))
@@ -693,3 +721,128 @@ class ServerApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+MASTER_CV = """# Mohammed Bakr
+Computer Engineer · Riyadh · +966 50 000 0000 · m@example.com
+
+## Summary
+Computer Engineering graduate who builds practical systems.
+
+## Projects
+### Recipe Blog — Personal
+- Wrote articles about cooking
+### Smart Black Box — Graduation Project (Team Leader)
+- Led a team of four engineers
+- Built network telemetry with Python and Linux
+
+## Skills
+Technical: Photoshop, Excel, Python, Networking
+
+## Certifications
+- Fundamentals of Artificial Intelligence — SDAIA (2025)
+"""
+
+
+class MasterCvTests(AgentCase):
+    def test_tailoring_reorders_but_never_invents(self):
+        from jobhunter import cv as cvlib
+        job = {"title": "Network Engineer", "company": "Gulf Net", "description": "Python, Linux and networking."}
+        tailored = cvlib.tailor(cvlib.parse(MASTER_CV), job, validate(PROFILE))
+        text = cvlib.to_text(tailored)
+        projects = next(s for s in tailored.sections if s.title == "Projects")
+        self.assertTrue(projects.entries[0].heading.startswith("Smart Black Box"))
+        self.assertEqual("Built network telemetry with Python and Linux", projects.entries[0].bullets[0])
+        self.assertIn("Technical: Python, Networking", text)
+        self.assertIn("Target role: Network Engineer at Gulf Net", text)
+        master_lines = set(MASTER_CV.splitlines())
+        for line in text.splitlines():
+            if line.strip() and not line.startswith("Target role") and not line.startswith("Technical:") and not line.startswith("## "):
+                self.assertIn(line, master_lines | {f"- {l[2:]}" for l in master_lines if l.startswith("- ")}, line)
+
+    def test_docx_is_valid_and_imports_back(self):
+        import zipfile
+        from jobhunter import cv as cvlib
+        path = cvlib.to_docx(cvlib.parse(MASTER_CV), self.root / "out.docx")
+        with zipfile.ZipFile(path) as archive:
+            self.assertIn("word/document.xml", archive.namelist())
+            self.assertIn("Smart Black Box", archive.read("word/document.xml").decode())
+        imported = cvlib.docx_to_master(path)
+        self.assertTrue(imported.startswith("# Mohammed Bakr"))
+        self.assertIn("## Projects", imported)
+        self.assertIn("- Led a team of four engineers", imported)
+
+    def test_application_attaches_a_cv_tailored_to_the_job(self):
+        self.hunter.save_master_cv(MASTER_CV)
+        with self.assertRaises(ValueError):
+            self.hunter.save_master_cv("just some words")
+        self.hunter.search()
+        answer = self.hunter.handle_text("apply 1")
+        job_id = self.hunter.store.get_state("last_list")[0]
+        self.assertIn("tailored from your master CV", answer)
+        self.hunter.handle_text(f"send {job_id}")
+        attachment = self.mailbox.sent[-1]["attachments"][0]
+        self.assertTrue(attachment.name.endswith(f"{job_id}.docx"))
+        self.assertIn("Acme_Tech", attachment.name)
+        self.assertIn("Master CV", self.hunter.handle_text("cv"))
+
+
+class CardAndCompanyTests(AgentCase):
+    def test_typed_card_saves_contact_and_prepares_application(self):
+        answer = self.hunter.handle_text("card Ahmed Ali, HR Manager, Acme Company, ahmed@acme.sa, +966 55 123 4567, www.acme.sa")
+        contact = self.hunter.store.list_contacts()[0]
+        self.assertEqual(("Ahmed Ali", "HR Manager", "Acme Company", "ahmed@acme.sa"),
+                         (contact["name"], contact["title"], contact["company"], contact["email"]))
+        self.assertEqual("+966 55 123 4567", contact["phone"])
+        self.assertIn("https://www.acme.sa", self.hunter.profile()["company_sites"])
+        self.assertIn("Application ready", answer)
+        draft = self.hunter.store.pending_draft(contact["job_id"])
+        self.assertEqual("ahmed@acme.sa", draft["to_addr"])
+        self.assertIn(contact["id"], self.hunter.handle_text("contacts"))
+
+    def test_card_photo_by_email_is_read_and_answered(self):
+        msg = EmailMessage()
+        msg["From"], msg["To"], msg["Subject"], msg["Message-ID"] = "me@gmail.com", "me@gmail.com", "", "<card1@gmail.com>"
+        msg.set_content("")
+        msg.add_attachment(b"\xff\xd8" + b"0" * 5000, maintype="image", subtype="jpeg", filename="IMG_1.jpg")
+        fields = {"name": "Sara", "title": "Talent Lead", "company": "Neom", "email": "sara@neom.example",
+                  "phone": "", "website": "", "method": "ollama"}
+        with mock.patch("jobhunter.cards.read_card", return_value=dict(fields)):
+            self.assertEqual({"command": 1}, self.deliver(parse_message(msg.as_bytes()))["kinds"])
+        reply = self.mailbox.sent[-1]
+        self.assertIn("Saved contact", reply["text"])
+        self.assertIn("sara@neom.example", reply["text"])
+        self.assertEqual(1, len(list((self.hunter.data_dir / "cards").iterdir())))
+
+    def test_unreadable_card_asks_for_details(self):
+        with mock.patch("jobhunter.cards.read_card", return_value={"name": "", "title": "", "company": "", "email": "",
+                                                                   "phone": "", "website": "", "method": "none"}):
+            self.assertIn("couldn't read", self.hunter.add_card_image("x.jpg", b"123"))
+
+    def test_company_sites_detect_ats_and_plain_pages(self):
+        from jobhunter import companies
+        self.assertEqual(("greenhouse", "careem"), companies.detect_ats("https://boards.greenhouse.io/careem"))
+        home = ('<html><title>Acme Tech | Home</title><a href="/about">About</a>'
+                '<a href="https://acme.example/careers">Careers</a></html>')
+        careers = ('<a href="/careers/jobs/123-junior-software-engineer">Junior Software Engineer</a>'
+                   '<a href="/careers/jobs/124">Apply now</a><a href="https://other.example/jobs/1">Elsewhere</a>')
+        pages = {"https://acme.example": home.encode(), "https://acme.example/careers": careers.encode()}
+        with mock.patch("jobhunter.companies.http_get", side_effect=lambda url, *a, **k: pages[url]):
+            jobs, note = companies.scan_site("https://acme.example")
+        self.assertEqual(["Junior Software Engineer"], [j["title"] for j in jobs])
+        self.assertEqual("Acme Tech", jobs[0]["company"])
+        embed = b'<script src="https://boards.greenhouse.io/embed/job_board/js?for=acme"></script>'
+        with mock.patch("jobhunter.companies.http_get", return_value=b'<iframe src="https://job-boards.greenhouse.io/acme"></iframe>'), \
+             mock.patch("jobhunter.companies.get_json", return_value={"jobs": [{"id": 1, "title": "IT Support",
+                                                                                "absolute_url": "https://gh/1"}]}):
+            jobs, note = companies.scan_site("https://acme.example/join")
+        self.assertIn("Greenhouse", note)
+        self.assertEqual("IT Support", jobs[0]["title"])
+        self.assertTrue(embed)
+
+    def test_add_company_command_and_arabic_commands(self):
+        self.assertIn("company", self.hunter.handle_text("add company https://careers.stc.com.sa").lower())
+        self.assertIn("https://careers.stc.com.sa", self.hunter.profile()["company_sites"])
+        self.assertIn("Pipeline", self.hunter.handle_text("الحالة"))
+        self.hunter.search()
+        self.assertIn("careers@acme-tech.com", self.hunter.handle_text("قدم 1"))

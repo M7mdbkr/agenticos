@@ -1,6 +1,25 @@
 /* Job Hunter page. Classic script loaded before app.js; uses its helpers (api, esc, toast, shell, head, modal) at call time. */
 const JobHunterPage = (() => {
-  const ui = {tab: 'matches', status: null, profile: null, jobs: [], chat: [], results: null, filter: '', busy: false};
+  const ui = {tab: 'matches', status: null, profile: null, jobs: [], chat: [], results: null, filter: '', busy: false, cardLog: []};
+  const CV_EXAMPLE = `# Mohammed Bakr
+Computer Engineer · Riyadh, Saudi Arabia · +966 5x xxx xxxx · you@gmail.com · linkedin.com/in/you
+
+## Summary
+Computer Engineering graduate (Taif University, 2026) …
+
+## Education
+### B.Sc. Computer Engineering — Taif University (2021 – 2026)
+GPA 3.22 / 4.00
+
+## Projects
+### Smart Black Box — Graduation Project (Team Leader)
+- What you built and the result
+
+## Skills
+Technical: Python, SQL, Networking, Linux
+
+## Certifications
+- Fundamentals of Artificial Intelligence — SDAIA (2025)`;
   const STATUS_COLORS = {new: 'blue', notified: 'blue', interested: 'purple', drafted: 'orange', applied: 'green',
     interview: 'green', assessment: 'orange', offer: 'green', rejected: 'red', skipped: '', closed: ''};
   const TRACKED = ['drafted', 'applied', 'interview', 'assessment', 'offer', 'rejected'];
@@ -62,6 +81,7 @@ const JobHunterPage = (() => {
     const draftFor = ui.status.drafts.find(d => d.job_id === j.id);
     const actions = [];
     if (j.url) actions.push(`<a class="button ghost small" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer">Open ↗</a>`);
+    if (ui.status.master_cv) actions.push(`<a class="button ghost small" href="/api/jobhunter/jobs/${esc(j.id)}/cv" download>CV for this job ⬇</a>`);
     if (['new', 'notified', 'interested', 'drafted'].includes(j.status)) actions.push(btn('apply', j.apply_email ? '✉ Apply by email' : '📝 Prepare application', j.id, 'primary small'));
     if (draftFor) actions.push(btn('draft', 'Review & send', draftFor.id, 'primary small'));
     if (['new', 'notified'].includes(j.status)) actions.push(btn('save', 'Save', j.id));
@@ -128,6 +148,32 @@ const JobHunterPage = (() => {
       ${data.events.map(e => `<div class="jh-logrow"><span class="pill ${e.kind === 'error' || e.kind === 'security' ? 'red' : ''}">${esc(e.kind)}</span><div><strong>${esc(e.message)}</strong><p class="jh-muted">${ago(e.created_at)}</p></div></div>`).join('') || '<p class="jh-muted">Nothing yet.</p>'}</section></div>`;
   }
 
+  async function contactsTab() {
+    const contacts = await api('/jobhunter/contacts');
+    const sites = ui.profile.company_sites || [];
+    const status = ui.status.company_status || {};
+    return `<div class="grid two"><section class="panel"><div class="panel-head"><div><h2>Business cards</h2><p>Take a photo — I read it, save the contact, and if there's an email I prepare an application with a CV tailored to that company (you approve before it's sent). You can also email the photo to yourself or send it to the Telegram bot.</p></div></div>
+        <label class="button primary jh-upload">📷 Photo of a card<input type="file" id="jh-card-file" accept="image/*" capture="environment" multiple hidden></label>
+        <form id="jh-card-text" class="jh-searchform section-gap"><input name="text" placeholder="…or type it: Ahmed Ali, HR Manager, Acme, ahmed@acme.com, 0551234567" required><button class="button ghost">Save</button></form>
+        ${ui.cardLog.map(m => `<pre class="jh-pre">${esc(m)}</pre>`).join('')}</section>
+      <section class="panel"><div class="panel-head"><div><h2>Company websites</h2><p>Send any company link (homepage or careers page). I find the jobs page and check it on every search.</p></div></div>
+        <form id="jh-site" class="jh-searchform"><input name="url" placeholder="https://company.com/careers" required><button class="button primary">Watch</button></form>
+        ${sites.map(url => `<div class="jh-logrow"><span class="pill ${/error|browser|no job/.test(status[url] || '') ? 'orange' : status[url] ? 'green' : ''}">${status[url] ? 'checked' : 'new'}</span><div><strong>${esc(url)}</strong><p class="jh-muted">${esc(status[url] || 'Will be checked on the next search')}</p></div>${btn('unwatch', '✕', url)}</div>`).join('') || '<p class="jh-muted">No company sites yet.</p>'}</section></div>
+      <section class="section-gap"><h2 class="section-title">Contacts (${contacts.length})</h2>
+      <div class="jh-jobs">${contacts.map(c => `<article class="jh-job"><div class="jh-job-top"><span class="pill purple">${esc(c.source.split(':')[0])}</span><span class="jh-id">${esc(c.id)}</span></div>
+        <h3>${esc(c.name || c.email || 'Unnamed')}</h3><p class="jh-company">${esc([c.title, c.company].filter(Boolean).join(' · '))}</p>
+        <p class="jh-muted">${esc([c.email, c.phone, c.website].filter(Boolean).join(' · '))}</p>
+        ${c.job_id ? `<div class="jh-actions">${btn('draftfor', 'Application draft', c.job_id, 'primary small')}${btn('details', 'Details', c.job_id)}</div>` : ''}</article>`).join('') || '<div class="empty">No contacts yet.</div>'}</div></section>`;
+  }
+
+  async function cvTab() {
+    const master = (await api('/jobhunter/cv/master')).text;
+    return `<section class="panel"><div class="panel-head"><div><h2>Master CV</h2><p>Write everything true about you once. For every job I make a copy that puts the most relevant projects, bullets and skills first and adds the target role. Nothing new is ever invented. Output: ATS-friendly single-column Word file.</p></div>
+        <label class="button ghost">Import .docx<input type="file" id="jh-cv-import" accept=".docx,.md,.txt" hidden></label></div>
+      <form id="jh-master"><textarea id="jh-master-text" name="text" rows="26" spellcheck="false" placeholder="${esc(CV_EXAMPLE)}">${esc(master)}</textarea>
+      <div class="jh-actions"><button class="button primary">Save master CV</button><span class="jh-muted">Format: <code># Name</code>, contact line, <code>## Section</code>, <code>### Entry</code>, <code>- bullet</code></span></div></form></section>`;
+  }
+
   function field(name, label, value, type = 'text', extra = '') {
     return `<div><label for="jh-${name}">${label}</label><input id="jh-${name}" name="${name}" type="${type}" value="${esc(value ?? '')}" ${extra}></div>`;
   }
@@ -157,6 +203,8 @@ const JobHunterPage = (() => {
         <div class="jh-sources">${sources}</div>
         <div class="form-row">${field('greenhouse_boards', 'Greenhouse company boards', list(p.greenhouse_boards), 'text', 'placeholder="e.g. careem, stripe"')}${field('lever_boards', 'Lever company boards', list(p.lever_boards), 'text', 'placeholder="e.g. tamara"')}</div>
         ${field('rss_feeds', 'Extra RSS job feeds', list(p.rss_feeds), 'text', 'placeholder="https://…/jobs.rss"')}
+        ${field('company_sites', 'Company websites to watch', list(p.company_sites), 'text', 'placeholder="https://company.com/careers, https://other.sa"')}
+        ${field('vision_model', 'Ollama vision model for business cards', p.vision_model, 'text', 'placeholder="llama3.2-vision (empty = tesseract OCR)"')}
       </section>
       <section class="panel section-gap"><div class="panel-head"><div><h2>Rhythm & notifications</h2></div></div>
         <div class="form-row">${field('search_every_minutes', 'Search every (minutes)', p.search_every_minutes, 'number', 'min="30"')}${field('inbox_every_minutes', 'Check inbox every (minutes)', p.inbox_every_minutes, 'number', 'min="2"')}</div>
@@ -181,8 +229,9 @@ const JobHunterPage = (() => {
   // ── page ───────────────────────────────────────────────────────────────
   async function body() {
     const s = ui.status;
-    const tabs = [['matches', 'Matches'], ['applications', 'Applications'], ['ask', 'Ask'], ['activity', 'Activity'], ['settings', 'Settings']];
+    const tabs = [['matches', 'Matches'], ['applications', 'Applications'], ['contacts', 'Contacts & companies'], ['cv', 'CV'], ['ask', 'Ask'], ['activity', 'Activity'], ['settings', 'Settings']];
     const content = ui.tab === 'matches' ? matchesTab() : ui.tab === 'applications' ? applicationsTab() : ui.tab === 'ask' ? askTab()
+      : ui.tab === 'contacts' ? await contactsTab() : ui.tab === 'cv' ? await cvTab()
       : ui.tab === 'activity' ? await activityTab() : settingsTab();
     const agentBtn = s.running ? btn('stop', 'Stop agent', '', 'ghost') : s.service ? '' : btn('start', '▶ Start agent', '', 'primary');
     return head('JOB HUNTER', 'Finds jobs on every site and emails you.',
@@ -283,6 +332,8 @@ const JobHunterPage = (() => {
       if (action === 'inbox') { b.disabled = true; const r = await api('/jobhunter/inbox', {method: 'POST', body: '{}'}); toast(r.error || `Read ${r.checked || 0} new emails`); return refresh(); }
       if (action === 'testmail') { await api('/jobhunter/email/test', {method: 'POST', body: '{}'}); return toast('Test email sent — reply “status” to it'); }
       if (action === 'draft') return openDraft(id);
+      if (action === 'draftfor') { const d = ui.status.drafts.find(x => x.job_id === id); return d ? openDraft(d.id) : jobAction('apply', id); }
+      if (action === 'unwatch') { await api('/jobhunter/profile', {method: 'POST', body: JSON.stringify({company_sites: ui.profile.company_sites.filter(u => u !== id)})}); return refresh(); }
       if (action === 'cancel') { await api(`/jobhunter/jobs/${id}/cancel`, {method: 'POST', body: '{}'}); toast('Discarded'); return refresh(); }
       return await jobAction(action, id);
     } catch (err) { toast(err.message); }
@@ -348,6 +399,42 @@ const JobHunterPage = (() => {
         const data = await r.json(); if (!r.ok) throw Error(data.error || 'Upload failed');
         toast(`CV saved: ${data.cv}`); await refresh();
       } catch (err) { toast(err.message); }
+    };
+    const upload = async (path, file) => {
+      const r = await fetch('/api/jobhunter/' + path, {method: 'POST', headers: {'X-Filename': file.name, 'Content-Type': 'application/octet-stream'}, body: file});
+      const data = await r.json(); if (!r.ok) throw Error(data.error || 'Upload failed'); return data;
+    };
+    const cardFile = document.getElementById('jh-card-file');
+    if (cardFile) cardFile.onchange = async () => {
+      for (const file of cardFile.files) {
+        toast(`Reading ${file.name}…`);
+        try { ui.cardLog.unshift((await upload('cards', file)).message); } catch (err) { toast(err.message); }
+      }
+      await refresh();
+    };
+    const cardText = document.getElementById('jh-card-text');
+    if (cardText) cardText.onsubmit = async e => {
+      e.preventDefault();
+      try { ui.cardLog.unshift((await api('/jobhunter/contacts', {method: 'POST', body: JSON.stringify({text: new FormData(cardText).get('text')})})).message); await refresh(); }
+      catch (err) { toast(err.message); }
+    };
+    const site = document.getElementById('jh-site');
+    if (site) site.onsubmit = async e => {
+      e.preventDefault();
+      let url = String(new FormData(site).get('url')).trim(); if (!/^https?:\/\//.test(url)) url = 'https://' + url;
+      try { await api('/jobhunter/profile', {method: 'POST', body: JSON.stringify({company_sites: [...(ui.profile.company_sites || []), url]})}); toast('Watching ' + url); await refresh(); }
+      catch (err) { toast(err.message); }
+    };
+    const master = document.getElementById('jh-master');
+    if (master) master.onsubmit = async e => {
+      e.preventDefault();
+      try { const r = await api('/jobhunter/cv/master', {method: 'POST', body: JSON.stringify({text: document.getElementById('jh-master-text').value})}); toast(`Master CV saved (${r.sections.length} sections)`); await refresh(); }
+      catch (err) { toast(err.message); }
+    };
+    const cvImport = document.getElementById('jh-cv-import');
+    if (cvImport) cvImport.onchange = async () => {
+      try { document.getElementById('jh-master-text').value = (await upload('cv/import', cvImport.files[0])).text; toast('Imported — check it, then Save'); }
+      catch (err) { toast(err.message); }
     };
     const email = document.getElementById('jh-email');
     if (email) email.onsubmit = async e => {

@@ -59,3 +59,6 @@
   .jh-listhead { flex-direction: column; align-items: stretch; }
   .jh-listhead input { max-width: none; }
 }
+.jh-upload { cursor: pointer; }
+#jh-master-text { font: 13px/1.5 var(--mono, monospace); min-height: 420px; }
+.jh-logrow .button { margin-left: auto; flex: none; }

@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
-from . import notify, writer
+from . import cards, companies, cv as cvlib, notify, writer  # noqa: F401  (importing companies registers its source)
 from .commands import Commands, command_lines
 from .config import data_dir as default_data_dir, mail_settings
 from .inbox import LABELS, classify_reply, is_job_alert, looks_recruiting, match_company, parse_alert
@@ -41,7 +41,7 @@ TICK_SECONDS = 20
 # name → (minimum minutes between scheduled runs, maximum API calls per run). Keeps free API quotas safe.
 SOURCE_BUDGETS = {"jsearch": (1440, 5), "serpapi": (1440, 3), "adzuna": (360, 8)}
 DEFAULT_BUDGET = (0, 16)
-COMMAND_SUBJECT = re.compile(r"^\s*\[?(jobs?|job ?hunter|agent)\]?(\s*[:\-]|\s*$)", re.I)
+COMMAND_SUBJECT = re.compile(r"^\s*\[?(jobs?|job ?hunter|agent|cards?|contacts?|وظائف|وظايف|كرت|كروت|بطاقة|بطاقات)\]?(\s*[:\-]|\s*$)", re.I)
 _REPLY_PREFIX = re.compile(r"^((re|fwd?|aw|sv)\s*:\s*)+", re.I)
 
 
@@ -310,6 +310,8 @@ class JobHunter:
             fetched.extend(items)
             last_runs[name] = now.isoformat()
         self.store.set_state("source_last_run", last_runs)
+        if ctx.get("company_status"):
+            self.store.set_state("company_status", {**(self.store.get_state("company_status", {}) or {}), **ctx["company_status"]})
 
         new_jobs: List[Dict[str, Any]] = []
         run_scores: Dict[str, int] = {}
@@ -503,6 +505,8 @@ class JobHunter:
             return True  # a dedicated agent mailbox: everything you send it is for the agent
         if self.store.own_message(msg.thread_ids):
             return True  # a reply to one of the agent's emails
+        if msg.images:
+            return True  # a photo you sent yourself = a business card to save
         return bool(COMMAND_SUBJECT.search(_REPLY_PREFIX.sub("", msg.subject)))
 
     def process_message(self, msg: IncomingMail, alert_jobs: Optional[List[Dict[str, Any]]] = None) -> str:
@@ -560,11 +564,13 @@ class JobHunter:
         subject = _REPLY_PREFIX.sub("", msg.subject).strip()
         subject_command = COMMAND_SUBJECT.sub("", subject, count=1).strip(" :-")
         body = "\n".join(command_lines(msg.text))
-        text = body or subject_command or "help"
+        card_answers = [self.add_card_image(name, data, source="email") for name, data in msg.images]
+        text = body or subject_command or ("" if card_answers else "help")
         lists = self.store.get_state("lists", {}) or {}
         list_ids = next((lists[ref] for ref in msg.thread_ids if ref in lists), None)
         before = self.store.get_state("last_list")
-        answer = self.handle_text(text, channel="email", list_ids=list_ids)
+        answer = self.handle_text(text, channel="email", list_ids=list_ids) if text else ""
+        answer = "\n\n".join(x for x in card_answers + [answer] if x)
         after = self.store.get_state("last_list")
         self.store.log_mail("in", "command", message_id=message_id, from_addr=msg.from_addr, subject=msg.subject,
                             snippet=text[:300])
@@ -618,26 +624,125 @@ class JobHunter:
     def prepare_application(self, job_id: str) -> str:
         job = self.store.get_job(job_id)
         profile = self.profile()
-        letter = writer.cover_letter(job, profile, self.brain(), self._signature_email(profile))
+        has_master = bool(self.master_cv().strip())
+        letter_profile = {**profile, "cv_path": profile["cv_path"] or ("master" if has_master else "")}
+        letter = writer.cover_letter(job, letter_profile, self.brain(), self._signature_email(profile))
         letters = self.data_dir / "letters"
         letters.mkdir(parents=True, exist_ok=True)
         (letters / f"{job['id']}.txt").write_text(letter, encoding="utf-8")
         status = "drafted" if job["status"] in OPEN_STATUSES else job["status"]
         self.store.update_job(job["id"], cover_letter=letter, status=status)
-        cv = self._cv_path(profile)
+        tailored = self.tailored_cv(job["id"])
+        cv = tailored or self._cv_path(profile)
+        cv_note = (f"{cv.name} (tailored from your master CV)" if tailored else cv.name) if cv else \
+            "none (add a master CV or a CV file in Job Hunter settings)"
         header = f"[{job['id']}] {job['title']} — {job['company'] or 'unknown company'}"
         if job["apply_email"]:
             draft = self.store.add_draft(job["id"], "application", job["apply_email"],
-                                         writer.application_subject(job, profile), letter, attach_cv=bool(cv))
+                                         writer.application_subject(job, profile), letter, attach_cv=bool(cv),
+                                         attachment=str(tailored or ""))
             return (f"✉ Application ready for {header}\nTo: {draft['to_addr']}\nSubject: {draft['subject']}\n"
-                    f"Attachment: {cv.name if cv else 'none (add your CV in Job Hunter settings)'}\n\n{letter}\n\n"
+                    f"Attachment: {cv_note}\n\n{letter}\n\n"
                     f"→ Reply \"send {job['id']}\" to send it, or \"cancel {job['id']}\".")
         opened = ""
         if profile["open_browser_on_apply"] and job["url"] and self._opener(job["url"], self.data_dir / "browser-profile"):
             opened = "\nI opened the page in your laptop's browser."
-        return (f"📝 {header} is applied for on the website:\n{job['url'] or '(no link)'}{opened}\n\n"
+        cv_line = f"\nCV to upload: {tailored}" if tailored else ""
+        return (f"📝 {header} is applied for on the website:\n{job['url'] or '(no link)'}{opened}{cv_line}\n\n"
                 f"Tailored cover letter to paste:\n\n{letter}\n\n"
                 f"→ After you submit, reply \"applied {job['id']}\" and I'll watch for their answer and follow up.")
+
+    # ── master CV ───────────────────────────────────────────────────────────
+    @property
+    def master_cv_path(self) -> Path:
+        return self.data_dir / "master_cv.md"
+
+    def master_cv(self) -> str:
+        try:
+            return self.master_cv_path.read_text(encoding="utf-8")
+        except OSError:
+            return ""
+
+    def save_master_cv(self, text: str) -> Dict[str, Any]:
+        text = (text or "").replace("\r\n", "\n")
+        if len(text) > 60_000:
+            raise ValueError("The master CV is too long (max 60,000 characters)")
+        parsed = cvlib.parse(text)
+        if text.strip() and not (parsed.name and parsed.sections):
+            raise ValueError("Start with '# Your Name' and use '## Section' headings (see the example)")
+        self.master_cv_path.write_text(text, encoding="utf-8")
+        self.store.event("cv", "Master CV updated")
+        return {"sections": [s.title for s in parsed.sections], "name": parsed.name}
+
+    def tailored_cv(self, job_id: str) -> Optional[Path]:
+        """Write a job-specific .docx from the master CV (reorders/trims only — never adds facts)."""
+        master = self.master_cv()
+        if not master.strip():
+            return None
+        job = self.store.get_job(job_id)
+        tailored = cvlib.tailor(cvlib.parse(master), job, self.profile())
+        name = cvlib.safe_filename(tailored.name, "CV", job["company"] or job["title"])
+        return cvlib.to_docx(tailored, self.data_dir / "cv" / "tailored" / f"{name}_{job['id']}.docx")
+
+    # ── contacts & business cards ───────────────────────────────────────────
+    def add_contact(self, fields: Dict[str, Any], source: str = "manual", image_path: str = "") -> str:
+        fields = {k: str(v or "").strip() for k, v in fields.items()}
+        if not any(fields.get(k) for k in ("name", "email", "company", "website", "phone")):
+            return ("📇 I saved the photo but couldn't read the card. Reply with the details, e.g.\n"
+                    "card Ahmed Ali, HR Manager, Acme, ahmed@acme.com, 0551234567")
+        contact = self.store.add_contact({**fields, "source": source, "image_path": image_path})
+        profile = self.profile()
+        lines = [f"📇 Saved contact [{contact['id']}]: " + " · ".join(
+            x for x in (contact["name"], contact["title"], contact["company"], contact["email"], contact["phone"], contact["website"]) if x)]
+        if contact["website"] and contact["website"] not in profile["company_sites"]:
+            self.update_profile({"company_sites": profile["company_sites"] + [contact["website"]]})
+            lines.append(f"🌐 I'll watch {contact['website']} for open jobs on every search.")
+        if contact["email"]:
+            role = profile["roles"][0].title() if profile["roles"] else "Open position"
+            item = make_job(f"card:{contact['id']}", f"{role} (open application)", contact["company"] or contact["name"],
+                            "", contact["website"], apply_email=contact["email"])
+            item["description"] = f"Contact from a business card: {contact['name']} {contact['title']}".strip()
+            stored, _ = self.store.upsert_job(item, max(profile["min_score"], 60), [f"business card: {contact['name'] or contact['email']}"])
+            self.store.update_job(stored["id"], status="interested", apply_email=contact["email"])
+            self.store.update_contact(contact["id"], job_id=stored["id"])
+            lines.append(self.prepare_application(stored["id"]))
+        else:
+            lines.append("No email on the card, so there's nobody to send an application to yet.")
+        self.store.event("contact", lines[0][:200], contact_id=contact["id"])
+        return "\n\n".join(lines)
+
+    def add_card_image(self, filename: str, data: bytes, source: str = "upload") -> str:
+        path = cards.save_image(self.data_dir / "cards", filename, data)
+        profile = self.profile()
+        fields = cards.read_card(path, profile.get("vision_model", ""))
+        method = fields.pop("method", "none")
+        fields.pop("raw", None)
+        answer = self.add_contact(fields, source=f"{source}:{method}", image_path=str(path))
+        note = {"ollama": "\n(Read with the local vision model — double-check the details.)",
+                "tesseract": "\n(Read with OCR — double-check the details.)"}.get(method, "")
+        return answer + note
+
+    def add_card_text(self, text: str) -> str:
+        return self.add_contact(cards.parse_text(text), source="typed")
+
+    def contacts_text(self) -> str:
+        contacts = self.store.list_contacts(30)
+        if not contacts:
+            return "No contacts yet — send me a photo of a business card (email attachment, Telegram or the app)."
+        return "Your contacts:\n" + "\n".join(
+            f"  [{c['id']}] " + " · ".join(x for x in (c["name"], c["title"], c["company"], c["email"], c["phone"]) if x)
+            + (f" → job [{c['job_id']}]" if c["job_id"] else "") for c in contacts)
+
+    def cv_text(self, job_id: Optional[str] = None) -> str:
+        if not self.master_cv().strip():
+            return ("You don't have a master CV yet. Paste it in Job Hunter → CV, or run "
+                    "\"python3 -m jobhunter cv import ATS-1.docx\" on your laptop.")
+        if job_id:
+            path = self.tailored_cv(job_id)
+            return f"Tailored CV for [{job_id.upper()}]: {path}"
+        parsed = cvlib.parse(self.master_cv())
+        return (f"Master CV: {parsed.name} — sections: {', '.join(s.title for s in parsed.sections)}.\n"
+                "Every application gets its own tailored copy (reply \"cv <id>\" to make one now).")
 
     def send_draft(self, job_id: str) -> str:
         job = self.store.get_job(job_id)
@@ -648,7 +753,7 @@ class JobHunter:
         if not mailbox.configured:
             return "Email isn't connected yet — add it in Job Hunter settings, then reply send again."
         profile = self.profile()
-        cv = self._cv_path(profile)
+        cv = Path(draft["attachment"]) if draft.get("attachment") and Path(draft["attachment"]).is_file() else self._cv_path(profile)
         attachments = [cv] if draft["attach_cv"] and cv else []
         owners = self.owner_emails(profile)
         bcc = [o for o in owners if o != (mailbox.address or "").lower()][:1]
@@ -812,5 +917,7 @@ class JobHunter:
             "last_run": self.store.last_run(), "counts": self.store.counts(),
             "drafts": self.store.list_drafts(), "followups_due": self.store.followups_due(profile["follow_up_days"]),
             "sources": self.describe_sources(profile), "last_error": self.last_error,
+            "master_cv": bool(self.master_cv().strip()),
+            "company_status": self.store.get_state("company_status", {}) or {},
             "keys": {k: bool(self.env.get(k)) for k in ("RAPIDAPI_KEY", "SERPAPI_KEY", "ADZUNA_APP_ID", "ADZUNA_APP_KEY")},
         }
