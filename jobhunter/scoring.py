@@ -15,6 +15,8 @@ REMOTE_TERMS = ("remote", "work from home", "wfh", "anywhere", "distributed", "�
 OPEN_REGIONS = ("worldwide", "anywhere", "global", "international", "emea", "mena", "middle east",
                 "gcc", "remote")
 LOCATION_ALIASES = {
+    "eastern province": ("eastern", "ash sharqiyah", "sharqiyah", "الشرقية", "المنطقة الشرقية", "dammam", "khobar",
+                         "al khobar", "dhahran", "jubail", "al jubail", "qatif", "al ahsa", "hofuf", "ras tanura"),
     "saudi arabia": ("ksa", "saudi", "kingdom of saudi arabia", "السعودية", "المملكة العربية السعودية",
                      "riyadh", "jeddah", "dammam", "khobar", "al khobar", "dhahran", "mecca", "makkah",
                      "medina", "madinah", "taif", "tabuk", "abha", "jubail", "yanbu", "neom", "qassim", "buraydah"),

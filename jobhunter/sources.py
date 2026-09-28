@@ -185,6 +185,8 @@ ENRICHERS = {"linkedin": enrich_linkedin}
 
 _BAYT_COUNTRIES = {"saudi arabia": "saudi-arabia", "ksa": "saudi-arabia", "saudi": "saudi-arabia",
                    "riyadh": "saudi-arabia", "jeddah": "saudi-arabia", "dammam": "saudi-arabia", "khobar": "saudi-arabia",
+                   "eastern": "saudi-arabia", "dhahran": "saudi-arabia", "jubail": "saudi-arabia", "taif": "saudi-arabia",
+                   "mecca": "saudi-arabia", "makkah": "saudi-arabia", "medina": "saudi-arabia",
                    "united arab emirates": "uae", "uae": "uae", "dubai": "uae", "abu dhabi": "uae", "qatar": "qatar",
                    "kuwait": "kuwait", "bahrain": "bahrain", "oman": "oman", "egypt": "egypt", "jordan": "jordan"}
 

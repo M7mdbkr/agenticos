@@ -69,6 +69,7 @@ class Commands:
             (re.compile(r"^/?(cv|resume|سيرة|السيرة)(?:\s+(\S+))?$", re.I),
              lambda m, c: self.hunter.cv_text(self.resolve(m.group(2)) if m.group(2) else None)),
             (re.compile(r"^/?set\s+(min(?:imum)?\s*score|level)\s+(\S+)$", re.I), self.set_setting),
+            (re.compile(r"^/?set\s+(remote|strict)\s+(on|off|yes|no)$", re.I), self.set_switch),
             (re.compile(r"^/?(?:track|add job)\s+(https?://\S+)(?:\s+(.+))?$", re.I), self.track),
             (re.compile(r"^(https?://\S+)$", re.I), self.track),
         ]
@@ -187,6 +188,14 @@ class Commands:
             raise ValueError("level must be entry, mid, senior or any")
         self.hunter.update_profile({key: value})
         return f"Updated {key.replace('_', ' ')} to {value}."
+
+    def set_switch(self, match, channel) -> str:
+        key = {"remote": "remote_ok", "strict": "strict_location"}[match.group(1).lower()]
+        value = match.group(2).lower() in ("on", "yes")
+        self.hunter.update_profile({key: value})
+        return {("remote_ok", True): "Remote jobs are included.", ("remote_ok", False): "Remote jobs are off.",
+                ("strict_location", True): "Only jobs in your locations will be shown.",
+                ("strict_location", False): "Jobs outside your locations can still show (with a lower score)."}[(key, value)]
 
     def track(self, match, channel) -> str:
         return self.hunter.track_url(match.group(1), (match.group(2) or "").strip() if match.lastindex and match.lastindex > 1 else "")

@@ -874,6 +874,16 @@ class CardAndCompanyTests(AgentCase):
         self.assertEqual("IT Support", jobs[0]["title"])
         self.assertTrue(embed)
 
+    def test_remote_off_and_eastern_province(self):
+        self.assertIn("off", self.hunter.handle_text("set remote off"))
+        self.hunter.handle_text("set strict on")
+        profile = self.hunter.profile()
+        self.assertEqual((False, True), (profile["remote_ok"], profile["strict_location"]))
+        profile = validate({**PROFILE, "locations": ["Riyadh", "Jeddah", "Eastern Province"], "remote_ok": False,
+                            "strict_location": True})
+        self.assertFalse(score_job(sources.job("x", "IT Support", "Co", "Al Khobar, Saudi Arabia"), profile)[2])
+        self.assertTrue(score_job(sources.job("x", "IT Support", "Co", "Remote", remote=True), profile)[2])
+
     def test_add_company_command_and_arabic_commands(self):
         self.assertIn("company", self.hunter.handle_text("add company https://careers.stc.com.sa").lower())
         self.assertIn("https://careers.stc.com.sa", self.hunter.profile()["company_sites"])
