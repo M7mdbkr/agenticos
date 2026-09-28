@@ -62,7 +62,8 @@ def source(name: str, label: str, mode: str, needs: tuple = (), default_on: bool
 # ── HTTP ─────────────────────────────────────────────────────────────────────
 
 def http_get(url: str, headers: Optional[Dict[str, str]] = None, timeout: int = 25, max_bytes: int = 8_000_000) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": BROWSER_UA, "Accept": "*/*", **(headers or {})})
+    request = urllib.request.Request(url, headers={"User-Agent": BROWSER_UA, "Accept": "*/*",
+                                                   "Accept-Language": "en-US,en;q=0.9,ar;q=0.8", **(headers or {})})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.read(max_bytes)
@@ -178,6 +179,45 @@ def enrich_linkedin(item: Dict[str, Any]) -> Dict[str, Any]:
 
 
 ENRICHERS = {"linkedin": enrich_linkedin}
+
+
+# ── Bayt (largest Gulf job board; public search pages, gently rate-limited) ──
+
+_BAYT_COUNTRIES = {"saudi arabia": "saudi-arabia", "ksa": "saudi-arabia", "saudi": "saudi-arabia",
+                   "riyadh": "saudi-arabia", "jeddah": "saudi-arabia", "dammam": "saudi-arabia", "khobar": "saudi-arabia",
+                   "united arab emirates": "uae", "uae": "uae", "dubai": "uae", "abu dhabi": "uae", "qatar": "qatar",
+                   "kuwait": "kuwait", "bahrain": "bahrain", "oman": "oman", "egypt": "egypt", "jordan": "jordan"}
+
+
+def parse_bayt(markup: str) -> List[Dict[str, Any]]:
+    jobs = []
+    for chunk in re.split(r"<li\b", markup)[1:]:
+        if "data-js-job" not in chunk[:600]:
+            continue
+        heading = re.search(r"<h2[^>]*>(.*?)</h2>", chunk, re.S)
+        link = re.search(r'<a\b[^>]*href="([^"]+)"', heading.group(1)) if heading else None
+        if not (heading and link):
+            continue
+        company = re.search(r'<div[^>]*class="[^"]*t-nowrap p10l[^"]*"[^>]*>.*?<span[^>]*>(.*?)</span>', chunk, re.S)
+        location = re.search(r'<div[^>]*class="[^"]*t-mute t-small[^"]*"[^>]*>(.*?)</div>', chunk, re.S)
+        href = html.unescape(link.group(1)).strip()
+        url = href if href.startswith("http") else "https://www.bayt.com" + href
+        job_id = re.search(r"-(\d{5,})/?$", url.split("?")[0])
+        jobs.append(job("bayt", heading.group(1), company.group(1) if company else "",
+                        location.group(1) if location else "", url.split("?")[0],
+                        external_id=job_id.group(1) if job_id else url))
+    return jobs
+
+
+@source("bayt", "Bayt.com", "query_location", covers="Saudi Arabia, UAE and the Gulf")
+def fetch_bayt(query: Query, ctx: Dict[str, Any]) -> List[Dict[str, Any]]:
+    location = (query.location or "").lower()
+    country = next((slug for key, slug in _BAYT_COUNTRIES.items() if key in location), "international")
+    slug = re.sub(r"[^a-z0-9]+", "-", query.terms.lower()).strip("-")
+    if not slug:
+        return []
+    markup = http_get(f"https://www.bayt.com/en/{country}/jobs/{slug}-jobs/", {"Accept": "text/html"})
+    return parse_bayt(markup.decode("utf-8", errors="replace"))
 
 
 # ── Free remote-job boards ──────────────────────────────────────────────────

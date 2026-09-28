@@ -573,6 +573,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"started": True}, 202)
             if path == "/inbox":
                 return self.send_json(hunter.check_inbox())
+            if path == "/doctor":
+                from jobhunter.doctor import run as doctor_run
+                return self.send_json({"checks": doctor_run(hunter, live=bool(data.get("live", True)))})
             if path == "/start":
                 result = hunter.start()
                 if result.get("running"):

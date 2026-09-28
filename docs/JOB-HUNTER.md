@@ -26,6 +26,18 @@ Telegram or the Send button). Emails to *you* are automatic.
 
 ## 1. Set it up (5 minutes)
 
+Easiest — one command that installs the card reader, asks your details, imports your CV, sends a test
+email, runs the first search, installs the background service and checks everything:
+
+```bash
+bash scripts/install-jobhunter.sh
+```
+
+Anytime something seems off: `python3 -m jobhunter doctor` (or Settings → 🩺 Check everything) checks
+email, every job site, the writing brain, the card reader and the service, and tells you the fix.
+
+Or step by step:
+
 ```bash
 cd ~/Desktop/Personal-OS          # this repository
 python3 -m jobhunter setup        # asks for roles, skills, locations, CV and your email

@@ -87,6 +87,9 @@ class FakeMailbox:
         self.inbox = []
         self.sent = []
 
+    def test(self):
+        return {"imap": True, "smtp": True}
+
     def fetch_new(self, state=None, first_run_days=2, limit=60):
         messages, self.inbox = self.inbox, []
         return messages, {"uidvalidity": "1", "last_uid": 10}
@@ -224,6 +227,19 @@ class SourceParserTests(unittest.TestCase):
             self.assertEqual("jsearch:bayt.com", sources.fetch_jsearch(Query("x"), ctx)[0]["source"])
         with mock.patch.object(sources, "get_json", return_value=payloads["remoteok"]):
             self.assertEqual("USD 50,000–70,000", sources.fetch_remoteok(Query(), ctx)[0]["salary"])
+
+    def test_bayt_search_page(self):
+        page = """<ul><li class="has-pointer-d" data-js-job="" data-job-id="5123456">
+            <h2 class="jb-title m0 t-large"><a data-js-aid="jobID" href="/en/saudi-arabia/jobs/it-support-engineer-5123456/?utm=1">IT Support Engineer</a></h2>
+            <div class="t-nowrap p10l"><span>Riyadh Tech Co.</span></div>
+            <div class="t-mute t-small">Riyadh &middot; Saudi Arabia</div></li>
+            <li class="other"><a href="/x">not a job</a></li></ul>"""
+        with mock.patch.object(sources, "http_get", return_value=page.encode()) as get:
+            jobs = sources.fetch_bayt(Query("IT support", "Riyadh"), {})
+        self.assertIn("/en/saudi-arabia/jobs/it-support-jobs/", get.call_args[0][0])
+        self.assertEqual([("IT Support Engineer", "Riyadh Tech Co.", "https://www.bayt.com/en/saudi-arabia/jobs/it-support-engineer-5123456/")],
+                         [(j["title"], j["company"], j["url"]) for j in jobs])
+        self.assertIn("Saudi Arabia", jobs[0]["location"])
 
     def test_rss_feed_and_keyed_sources_need_keys(self):
         rss = b"""<rss><channel><item><title>Acme: Backend Developer</title><link>https://wwr/1</link>
@@ -463,6 +479,24 @@ class InboxTests(AgentCase):
                        auth="mx.google.com; dkim=pass header.i=@icloud.com; spf=pass; dmarc=pass")
         self.assertEqual({"command": 1}, self.deliver(msg)["kinds"])
         self.assertEqual("mohammad@icloud.com", self.mailbox.sent[-1]["to"])
+
+
+class DoctorTests(AgentCase):
+    def test_offline_report_names_what_to_fix(self):
+        from jobhunter.doctor import format_report, run
+        checks = {c["name"]: c for c in run(self.hunter, live=False)}
+        self.assertEqual("ok", checks["Profile"]["status"])
+        self.assertEqual("fail", checks["Always on"]["status"])
+        self.assertIn("install-service", checks["Always on"]["fix"])
+        self.assertIn("thing(s) to fix", format_report(list(checks.values())))
+
+    def test_live_source_check_reports_errors_without_crashing(self):
+        from jobhunter.doctor import run
+        broken = Source("broken", "Broken", lambda q, c: (_ for _ in ()).throw(sources.SourceError("HTTP 429")), "query")
+        self.hunter.sources = {"fake": fake_source(JOBS), "broken": broken}
+        checks = {c["name"]: c for c in run(self.hunter, live=True)}
+        self.assertIn("4 postings", checks["Source · Fake"]["detail"])
+        self.assertEqual("warn", checks["Source · Broken"]["status"])
 
 
 class HelperTests(unittest.TestCase):

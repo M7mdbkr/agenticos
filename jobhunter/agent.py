@@ -19,7 +19,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
-from . import cards, companies, cv as cvlib, notify, writer  # noqa: F401  (importing companies registers its source)
+from . import cards, cv as cvlib, notify, writer
+from .companies import fetch_company_sites
+
+_REGISTERED_SOURCES = (fetch_company_sites,)  # importing companies registers the company-sites source
 from .commands import Commands, command_lines
 from .config import data_dir as default_data_dir, mail_settings
 from .inbox import LABELS, classify_reply, is_job_alert, looks_recruiting, match_company, parse_alert

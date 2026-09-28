@@ -215,7 +215,7 @@ Technical: Python, SQL, Networking, Linux
         <div class="form-row"><div><label for="jh-brain">Writing brain (cover letters & questions)</label><select id="jh-brain" name="brain">${[['none', 'Templates only'], ['ollama', 'Ollama (local, free)'], ['claude-code', 'Claude Code subscription'], ['codex-cli', 'Codex CLI subscription']].map(([v, l]) => `<option value="${v}" ${p.brain === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
           ${field('brain_model', 'Model (optional)', p.brain_model, 'text', 'placeholder="qwen2.5:7b / default"')}</div>
       </section>
-      <div class="jh-save"><button class="button primary">Save settings</button></div>
+      <div class="jh-save"><button type="button" class="button ghost" data-jh="doctor">🩺 Check everything</button><button class="button primary">Save settings</button></div>
     </form>
     <form id="jh-email" class="panel section-gap"><div class="panel-head"><div><h2>Email connection</h2><p>For Gmail: turn on 2-Step Verification, create an <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">App Password</a> and paste the 16 letters. Saved only in your local <code>.env</code>.</p></div>
       ${s.email.configured ? `<span class="pill green">Connected</span>` : '<span class="pill red">Not connected</span>'}</div>
@@ -330,6 +330,13 @@ Technical: Python, SQL, Networking, Linux
         refresh(false); return waitForRun(previous);
       }
       if (action === 'inbox') { b.disabled = true; const r = await api('/jobhunter/inbox', {method: 'POST', body: '{}'}); toast(r.error || `Read ${r.checked || 0} new emails`); return refresh(); }
+      if (action === 'doctor') {
+        b.disabled = true; b.textContent = 'Checking every site…';
+        const r = await api('/jobhunter/doctor', {method: 'POST', body: '{}'});
+        const icon = {ok: '✅', fail: '❌', warn: '⚠️', skip: '➖'};
+        modal('Health check', 'JOB HUNTER', `<div>${r.checks.map(c => `<div class="jh-logrow"><span>${icon[c.status]}</span><div><strong>${esc(c.name)}</strong><p class="jh-muted">${esc(c.detail)}</p>${c.fix ? `<p class="jh-muted">→ ${esc(c.fix)}</p>` : ''}</div></div>`).join('')}</div>`);
+        b.disabled = false; b.textContent = '🩺 Check everything'; return;
+      }
       if (action === 'testmail') { await api('/jobhunter/email/test', {method: 'POST', body: '{}'}); return toast('Test email sent — reply “status” to it'); }
       if (action === 'draft') return openDraft(id);
       if (action === 'draftfor') { const d = ui.status.drafts.find(x => x.job_id === id); return d ? openDraft(d.id) : jobAction('apply', id); }

@@ -128,6 +128,13 @@ def cmd_test_email(args) -> int:
     return 0 if used.get("email") else 1
 
 
+def cmd_doctor(args) -> int:
+    from .doctor import format_report, run
+    checks = run(_hunter(), live=not args.offline)
+    print(format_report(checks))
+    return 1 if any(c["status"] == "fail" for c in checks) else 0
+
+
 def cmd_card(args) -> int:
     hunter = _hunter()
     for item in args.photos:
@@ -226,6 +233,9 @@ def main(argv=None) -> int:
     ask.add_argument("text", nargs="+")
     ask.set_defaults(func=cmd_ask)
     sub.add_parser("test-email", help="send yourself a test email").set_defaults(func=cmd_test_email)
+    doctor = sub.add_parser("doctor", help="check email, every job site, brain, card reader and service")
+    doctor.add_argument("--offline", action="store_true", help="skip network checks")
+    doctor.set_defaults(func=cmd_doctor)
     card = sub.add_parser("card", help="save business cards: photo files or typed details")
     card.add_argument("photos", nargs="+", help='photo paths, or text like "Ahmed, HR, Acme, ahmed@acme.com"')
     card.set_defaults(func=cmd_card)
