@@ -5,7 +5,7 @@ A local-first personal agent operating system built around explicit consent, vis
 ## What it demonstrates
 
 - Specialist workspaces for CEO, job, email, and technology-news workflows
-- **Job Hunter** — an email-connected job agent that searches LinkedIn, remote boards, company career pages and job-alert emails, emails you ranked matches, answers your email/Telegram commands, tracks employer replies and drafts applications you approve with one word ([docs/JOB-HUNTER.md](docs/JOB-HUNTER.md))
+- **Job Hunter** — an email-connected job agent that searches LinkedIn, remote boards, company career pages and job-alert emails, emails you ranked matches, answers your email/Telegram commands, tracks employer replies and drafts applications you approve with one word ([docs/JOB-HUNTER.md](docs/JOB-HUNTER.md) · everything in one file: [docs/PROJECT-KNOWLEDGE.md](docs/PROJECT-KNOWLEDGE.md))
 - Approval cards before any external action
 - SQLite state and a SHA-256 audit chain for operational events
 - Optional Telegram and n8n integrations
